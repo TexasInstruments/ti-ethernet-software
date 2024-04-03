@@ -1,0 +1,19 @@
+Release notes for individual Linux driver changes:
+
+----------------------------------------------------------------------------------
+4/2/24
+----------------------------------------------------------------------------------
+DP83869:
+	- New PHY_ID and fixed OPMODE configure
+	- Added Macros for OPMODE CFGs
+
+DP83TG720:
+	- SQI and TDR Features added
+	- Added Force-M/S function & Auto Mode enable
+
+DP83TG812:
+	- SQI and TDR Features added
+	- Added Force-M/S function & Auto Mode enable
+----------------------------------------------------------------------------------
+
+

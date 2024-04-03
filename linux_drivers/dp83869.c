@@ -1,6 +1,14 @@
 // SPDX-License-Identifier: GPL-2.0
 /* Driver for the Texas Instruments DP83869 PHY
  * Copyright (C) 2019 Texas Instruments Inc.
+ *
+ * 21Mar2024 Alvaro Reyes (a-reyes1@ti.com)
+ * 
+ * New PHY_ID for 869 Added
+ * 
+ * Updated Functions:
+ * dp83869_set_strapped_mode
+ * dp83869_configure_mode
  */
 
 #include <linux/ethtool.h>
@@ -15,19 +23,23 @@
 
 #include <dt-bindings/net/ti-dp83869.h>
 
-#define DP83869_PHY_ID		0x2000a0f1
+#define DP83869_REV0_PHY_ID	0x2000a0f1
+#define DP83869_REV1_PHY_ID 0x2000a0f3
 #define DP83561_PHY_ID		0x2000a1a4
-#define DP83869_DEVADDR		0x1f
 
+#define PHY_IDEN_REG1		0x2
+#define PHY_IDEN_REG2		0x3
 #define MII_DP83869_PHYCTRL	0x10
 #define MII_DP83869_MICR	0x12
 #define MII_DP83869_ISR		0x13
 #define DP83869_CFG2		0x14
+#define LEDS_CFG1_DP83869	0x18
 #define DP83869_CTRL		0x1f
 #define DP83869_CFG4		0x1e
 
 /* Extended Registers */
-#define DP83869_GEN_CFG3        0x0031
+#define DP83869_DEVADDR		0x1f
+#define DP83869_GEN_CFG3	0x0031
 #define DP83869_RGMIICTL	0x0032
 #define DP83869_STRAP_STS1	0x006e
 #define DP83869_RGMIIDCTL	0x0086
@@ -104,6 +116,7 @@
 #define DP83869_IO_MUX_CFG_IO_IMPEDANCE_MIN	0x1f
 #define DP83869_IO_MUX_CFG_CLK_O_SEL_MASK	(0x1f << 8)
 #define DP83869_IO_MUX_CFG_CLK_O_SEL_SHIFT	8
+#define DP83869_LED1_MUX_RXER				0xE
 
 /* CFG3 bits */
 #define DP83869_CFG3_PORT_MIRROR_EN              BIT(0)
@@ -134,6 +147,13 @@
 #define DP83869_DOWNSHIFT_2_COUNT	2
 #define DP83869_DOWNSHIFT_4_COUNT	4
 #define DP83869_DOWNSHIFT_8_COUNT	8
+
+/* OPMODE Configure, as per section 9.4.8 of data sheet*/
+#define RGMII_to_SGMII			0x43
+#define MEDIA_CONVERT_1000M		0x44
+#define MEDIA_CONVERT_100M		0x45
+#define SGMII_to_COPPER			0x46
+
 
 enum {
 	DP83869_PORT_MIRRORING_KEEP,
@@ -511,11 +531,11 @@ static int dp83869_set_strapped_mode(struct phy_device *phydev)
 	struct dp83869_private *dp83869 = phydev->priv;
 	int val;
 
-	val = phy_read_mmd(phydev, DP83869_DEVADDR, DP83869_STRAP_STS1);
+	val = phy_read_mmd(phydev, DP83869_DEVADDR, DP83869_STRAP_STS1); 
 	if (val < 0)
 		return val;
 
-	dp83869->mode = (val >> 9) & DP83869_STRAP_OP_MODE_MASK;
+	dp83869->mode = (val & DP83869_STRAP_OP_MODE_MASK) >> 9;
 
 	return 0;
 }
@@ -694,8 +714,7 @@ static int dp83869_configure_mode(struct phy_device *phydev,
 	/* Below init sequence for each operational mode is defined in
 	 * section 9.4.8 of the datasheet.
 	 */
-	ret = phy_write_mmd(phydev, DP83869_DEVADDR, DP83869_OP_MODE,
-			    dp83869->mode);
+	ret = phy_write_mmd(phydev, DP83869_DEVADDR, DP83869_OP_MODE, dp83869->mode);						
 	if (ret)
 		return ret;
 
@@ -709,8 +728,7 @@ static int dp83869_configure_mode(struct phy_device *phydev,
 
 	switch (dp83869->mode) {
 	case DP83869_RGMII_COPPER_ETHERNET:
-		ret = phy_write(phydev, MII_DP83869_PHYCTRL,
-				phy_ctrl_val);
+		ret = phy_write(phydev, MII_DP83869_PHYCTRL, phy_ctrl_val);
 		if (ret)
 			return ret;
 
@@ -723,38 +741,48 @@ static int dp83869_configure_mode(struct phy_device *phydev,
 			return ret;
 		break;
 	case DP83869_RGMII_SGMII_BRIDGE:
-		ret = phy_modify_mmd(phydev, DP83869_DEVADDR, DP83869_OP_MODE,
-				     DP83869_SGMII_RGMII_BRIDGE,
-				     DP83869_SGMII_RGMII_BRIDGE);
+		ret = phy_write_mmd(phydev, DP83869_DEVADDR, DP83869_OP_MODE, RGMII_to_SGMII);
 		if (ret)
 			return ret;
 
-		ret = phy_write_mmd(phydev, DP83869_DEVADDR,
-				    DP83869_FX_CTRL, DP83869_FX_CTRL_DEFAULT);
+		ret = phy_write_mmd(phydev, DP83869_DEVADDR, DP83869_FX_CTRL, DP83869_FX_CTRL_DEFAULT);
 		if (ret)
 			return ret;
 
 		break;
 	case DP83869_1000M_MEDIA_CONVERT:
-		ret = phy_write(phydev, MII_DP83869_PHYCTRL,
-				phy_ctrl_val);
+		ret = phy_write(phydev, MII_DP83869_PHYCTRL, phy_ctrl_val);
 		if (ret)
 			return ret;
 
-		ret = phy_write_mmd(phydev, DP83869_DEVADDR,
-				    DP83869_FX_CTRL, DP83869_FX_CTRL_DEFAULT);
+		ret = phy_write_mmd(phydev, DP83869_DEVADDR, DP83869_OP_MODE, MEDIA_CONVERT_1000M);
+		if (ret)
+			return ret;
+
+		ret = phy_write_mmd(phydev, DP83869_DEVADDR, DP83869_FX_CTRL, DP83869_FX_CTRL_DEFAULT);
 		if (ret)
 			return ret;
 		break;
 	case DP83869_100M_MEDIA_CONVERT:
-		ret = phy_write(phydev, MII_DP83869_PHYCTRL,
-				phy_ctrl_val);
+		ret = phy_write(phydev, MII_DP83869_PHYCTRL, phy_ctrl_val);
 		if (ret)
 			return ret;
+		
+		ret = phy_write_mmd(phydev, DP83869_DEVADDR, DP83869_OP_MODE, MEDIA_CONVERT_100M);
+		if (ret)
+			return ret;
+
+		ret = phy_write(phydev, LEDS_CFG1_DP83869, DP83869_LED1_MUX_RXER);	
+		if (ret)
+			return ret;
+		
 		break;
 	case DP83869_SGMII_COPPER_ETHERNET:
-		ret = phy_write(phydev, MII_DP83869_PHYCTRL,
-				phy_ctrl_val);
+		ret = phy_write(phydev, MII_DP83869_PHYCTRL, phy_ctrl_val);
+		if (ret)
+			return ret;
+
+		ret = phy_write_mmd(phydev, DP83869_DEVADDR, DP83869_OP_MODE, SGMII_to_COPPER);
 		if (ret)
 			return ret;
 
@@ -762,8 +790,7 @@ static int dp83869_configure_mode(struct phy_device *phydev,
 		if (ret)
 			return ret;
 
-		ret = phy_write_mmd(phydev, DP83869_DEVADDR,
-				    DP83869_FX_CTRL, DP83869_FX_CTRL_DEFAULT);
+		ret = phy_write_mmd(phydev, DP83869_DEVADDR, DP83869_FX_CTRL, DP83869_FX_CTRL_DEFAULT);
 		if (ret)
 			return ret;
 
@@ -859,7 +886,7 @@ static int dp83869_probe(struct phy_device *phydev)
 	if (dp83869->mode == DP83869_RGMII_100_BASE ||
 	    dp83869->mode == DP83869_RGMII_1000_BASE)
 		phydev->port = PORT_FIBRE;
-
+	
 	return dp83869_config_init(phydev);
 }
 
@@ -882,7 +909,7 @@ static int dp83869_phy_reset(struct phy_device *phydev)
 
 #define DP83869_PHY_DRIVER(_id, _name)				\
 {								\
-	PHY_ID_MATCH_MODEL(_id),				\
+	PHY_ID_MATCH_EXACT(_id),				\
 	.name		= (_name),				\
 	.probe          = dp83869_probe,			\
 	.config_init	= dp83869_config_init,			\
@@ -898,16 +925,18 @@ static int dp83869_phy_reset(struct phy_device *phydev)
 	.resume		= genphy_resume,			\
 }
 
-static struct phy_driver dp83869_driver[] = {
-	DP83869_PHY_DRIVER(DP83869_PHY_ID, "TI DP83869"),
+static struct phy_driver dp83869_driver[] = { 
+	DP83869_PHY_DRIVER(DP83869_REV1_PHY_ID, "TI DP83869 Rev1"),
+	DP83869_PHY_DRIVER(DP83869_REV0_PHY_ID, "TI DP83869 Rev0"),
 	DP83869_PHY_DRIVER(DP83561_PHY_ID, "TI DP83561-SP"),
-
+	
 };
 module_phy_driver(dp83869_driver);
 
 static struct mdio_device_id __maybe_unused dp83869_tbl[] = {
-	{ PHY_ID_MATCH_MODEL(DP83869_PHY_ID) },
-	{ PHY_ID_MATCH_MODEL(DP83561_PHY_ID) },
+	{ PHY_ID_MATCH_EXACT(DP83869_REV0_PHY_ID) },
+	{ PHY_ID_MATCH_EXACT(DP83869_REV1_PHY_ID) },
+	{ PHY_ID_MATCH_EXACT(DP83561_PHY_ID) },
 	{ }
 };
 MODULE_DEVICE_TABLE(mdio, dp83869_tbl);
