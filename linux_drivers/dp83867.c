@@ -191,6 +191,10 @@ static int dp83867_set_wol(struct phy_device *phydev,
 
 	if (wol->wolopts & (WAKE_MAGIC | WAKE_MAGICSECURE | WAKE_UCAST |
 			    WAKE_BCAST)) {
+		if (wol->wolopts & (WAKE_BCAST))
+		{
+			printk("\nDP83867's Magic Packet functionality is only applicable for Unicast packets only; Broadcast packets are not supported.\n");
+		}
 		val_rxcfg |= DP83867_WOL_ENH_MAC;
 		val_micr |= MII_DP83867_MICR_WOL_INT_EN;
 
@@ -250,7 +254,7 @@ static void dp83867_get_wol(struct phy_device *phydev,
 {
 	u16 value, sopass_val;
 
-	wol->supported = (WAKE_UCAST | WAKE_BCAST | WAKE_MAGIC |
+	wol->supported = (WAKE_UCAST | WAKE_MAGIC |
 			WAKE_MAGICSECURE);
 	wol->wolopts = 0;
 
