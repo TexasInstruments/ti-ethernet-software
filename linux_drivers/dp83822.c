@@ -14,12 +14,14 @@
 #include <linux/netdevice.h>
 
 #define DP83822_PHY_ID	        0x2000a240
-#define DP83825S_PHY_ID		0x2000a140
-#define DP83825I_PHY_ID		0x2000a150
-#define DP83825CM_PHY_ID	0x2000a160
-#define DP83825CS_PHY_ID	0x2000a170
-#define DP83826C_PHY_ID		0x2000a130
-#define DP83826NC_PHY_ID	0x2000a110
+#define DP83825S_PHY_ID			0x2000a140
+#define DP83825I_PHY_ID			0x2000a150
+#define DP83825CM_PHY_ID		0x2000a160
+#define DP83825CS_PHY_ID		0x2000a170
+#define DP83826C_PHY_ID			0x2000a130
+#define DP83826REVB_E_PHY_ID	0x2000a131
+#define DP83826NC_PHY_ID		0x2000a110
+#define DP83826REVB_B_PHY_ID	0x2000a111
 
 #define DP83822_DEVADDR		0x1f
 
@@ -398,9 +400,9 @@ static int dp83822_config_init(struct phy_device *phydev)
 		tx_int_delay = phy_get_internal_delay(phydev, dev, NULL, 0,
 						      false);
 		if (tx_int_delay <= 0)
-			rgmii_delay &= ~DP83822_TX_CLK_SHIFT;
-		else
 			rgmii_delay |= DP83822_TX_CLK_SHIFT;
+		else
+			rgmii_delay &= ~DP83822_TX_CLK_SHIFT;
 
 		if (rgmii_delay) {
 			err = phy_set_bits_mmd(phydev, DP83822_DEVADDR,
@@ -629,6 +631,8 @@ static struct phy_driver dp83822_driver[] = {
 	DP83822_PHY_DRIVER(DP83822_PHY_ID, "TI DP83822"),
 	DP8382X_PHY_DRIVER(DP83825I_PHY_ID, "TI DP83825I"),
 	DP8382X_PHY_DRIVER(DP83826C_PHY_ID, "TI DP83826C"),
+	DP8382X_PHY_DRIVER(DP83826REVB_E_PHY_ID, "TI DP83826C"),
+	DP8382X_PHY_DRIVER(DP83826REVB_B_PHY_ID, "TI DP83826C"),
 	DP8382X_PHY_DRIVER(DP83826NC_PHY_ID, "TI DP83826NC"),
 	DP8382X_PHY_DRIVER(DP83825S_PHY_ID, "TI DP83825S"),
 	DP8382X_PHY_DRIVER(DP83825CM_PHY_ID, "TI DP83825M"),
@@ -640,6 +644,8 @@ static struct mdio_device_id __maybe_unused dp83822_tbl[] = {
 	{ DP83822_PHY_ID, 0xfffffff0 },
 	{ DP83825I_PHY_ID, 0xfffffff0 },
 	{ DP83826C_PHY_ID, 0xfffffff0 },
+	{ DP83826REVB_E_PHY_ID, 0xfffffff0 },
+	{ DP83826REVB_B_PHY_ID, 0xfffffff0 },
 	{ DP83826NC_PHY_ID, 0xfffffff0 },
 	{ DP83825S_PHY_ID, 0xfffffff0 },
 	{ DP83825CM_PHY_ID, 0xfffffff0 },
