@@ -2,6 +2,10 @@
 /* Driver for the Texas Instruments DP83869 PHY
  * Copyright (C) 2019 Texas Instruments Inc.
  *
+ * 23Apr2024 Alvaro Reyes (a-reyes1@ti.com)
+ * Updated Functions:
+ * dp83869_configure_fiber
+ * 
  * 21Mar2024 Alvaro Reyes (a-reyes1@ti.com)
  * 
  * New PHY_ID for 869 Added
@@ -677,21 +681,20 @@ static int dp83869_configure_fiber(struct phy_device *phydev,
 				 phydev->supported);
 		linkmode_set_bit(ETHTOOL_LINK_MODE_100baseFX_Half_BIT,
 				 phydev->supported);
+	}
+	/* Auto neg is not supported in Fiber mode */
+	bmcr = phy_read(phydev, MII_BMCR);
+	if (bmcr < 0)
+		return bmcr;
 
-		/* Auto neg is not supported in 100base FX mode */
-		bmcr = phy_read(phydev, MII_BMCR);
-		if (bmcr < 0)
-			return bmcr;
+	phydev->autoneg = AUTONEG_DISABLE;
+	linkmode_clear_bit(ETHTOOL_LINK_MODE_Autoneg_BIT, phydev->supported);
+	linkmode_clear_bit(ETHTOOL_LINK_MODE_Autoneg_BIT, phydev->advertising);
 
-		phydev->autoneg = AUTONEG_DISABLE;
-		linkmode_clear_bit(ETHTOOL_LINK_MODE_Autoneg_BIT, phydev->supported);
-		linkmode_clear_bit(ETHTOOL_LINK_MODE_Autoneg_BIT, phydev->advertising);
-
-		if (bmcr & BMCR_ANENABLE) {
-			ret =  phy_modify(phydev, MII_BMCR, BMCR_ANENABLE, 0);
-			if (ret < 0)
-				return ret;
-		}
+	if (bmcr & BMCR_ANENABLE) {
+		ret =  phy_modify(phydev, MII_BMCR, BMCR_ANENABLE, 0);
+		if (ret < 0)
+			return ret;
 	}
 
 	/* Update advertising from supported */
