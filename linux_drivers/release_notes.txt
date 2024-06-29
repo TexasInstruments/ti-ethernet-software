@@ -15,5 +15,24 @@ DP83TG812:
 	- SQI and TDR Features added
 	- Added Force-M/S function & Auto Mode enable
 ----------------------------------------------------------------------------------
+6/28/24
+----------------------------------------------------------------------------------
+DP83822:
+	- Add support for PHY_ID a131
+	- Fix RGMII shift/align mode initialization
+
+DP83869:
+	- Auto-negotiation disabled for 100/1000M Fiber mode
+
+DP83867:
+	- Clarified Broadcast packets are not supported on DP83867
+
+DP83TG720:
+	- Added MMD field for initialization scripts
+
+DP83TC812:
+	- Added MMD field for initialization scripts
+
+----------------------------------------------------------------------------------
 
 
