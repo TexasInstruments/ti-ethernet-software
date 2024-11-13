@@ -55,6 +55,9 @@
 
 #include <stdint.h>
 
+#include "phy_common.h"
+#include "port.h"
+
 #ifdef __cplusplus
 extern "C" {
 #endif
@@ -91,16 +94,16 @@ typedef struct Dp83tc812_Cfg_s
 {
 	/*! Enable TX clock shift */
 	bool txClkShiftEn;
-	
+
 	/*! Enable RX clock shift */
 	bool rxClkShiftEn;
-	
+
 	/*! Enable PHY interrupts */
 	bool interruptEn;
-	
+
 	/*! Enable SGMII auto negotiation */
 	bool sgmiiAutoNegEn;
-	
+
     /*! Master/Slave configuration */
     Dp83tc812_MasterSlaveMode MasterSlaveMode;
 } Dp83tc812_Cfg;
@@ -124,6 +127,27 @@ typedef struct Dp83tc812_Cfg_s
  */
 void Dp83tc812_initCfg(Dp83tc812_Cfg *cfg);
 
+void Dp83tc812_bind(EthPhyDrv_Handle* hPhy, 
+                    uint8_t phyAddr, 
+                    Phy_RegAccessCb_t* pRegAccessCb);
+
+bool Dp83tc812_isPhyDevSupported(EthPhyDrv_Handle hPhy,
+                                const void *pversion);
+
+bool Dp83tc812_isMacModeSupported(EthPhyDrv_Handle hPhy, 
+                                    Phy_Mii mii);
+
+int32_t Dp83tc812_config(EthPhyDrv_Handle hPhy,
+                        const void *pExtCfg,
+                        const uint32_t extCfgSize,
+						Phy_Mii mii, 
+						bool loopbackEn);
+
+void Dp83tc812_reset(EthPhyDrv_Handle hPhy);
+
+bool Dp83tc812_isResetComplete(EthPhyDrv_Handle hPhy);
+
+void Dp83tc812_printRegs(EthPhyDrv_Handle hPhy);
 /* ========================================================================== */
 /*                        Deprecated Function Declarations                    */
 /* ========================================================================== */

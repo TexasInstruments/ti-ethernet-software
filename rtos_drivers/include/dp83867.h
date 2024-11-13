@@ -56,6 +56,9 @@
 #include <stdint.h>
 #include <stdbool.h>
 
+#include "phy_common.h"
+#include "port.h"
+
 #ifdef __cplusplus
 extern "C" {
 #endif
@@ -240,6 +243,28 @@ typedef struct Dp83867_Cfg_s
  * \param cfg       DP83867 PHY config structure pointer
  */
 void Dp83867_initCfg(Dp83867_Cfg *cfg);
+
+void Dp83867_bind(EthPhyDrv_Handle* hPhy, 
+                    uint8_t phyAddr, 
+                    Phy_RegAccessCb_t* pRegAccessCb);
+
+bool Dp83867_isPhyDevSupported(EthPhyDrv_Handle hPhy, 
+                                const void *pVersion);
+
+bool Dp83867_isMacModeSupported(EthPhyDrv_Handle hPhy, 
+                                Phy_Mii mii);
+
+int32_t Dp83867_config(EthPhyDrv_Handle hPhy,
+                        const void *pExtCfg,
+                        const uint32_t extCfgSize,
+                        Phy_Mii mii, 
+                        bool loopbackEn);
+
+void Dp83867_reset(EthPhyDrv_Handle hPhy);
+
+bool Dp83867_isResetComplete(EthPhyDrv_Handle hPhy);
+
+void Dp83867_printRegs(EthPhyDrv_Handle hPhy);
 
 /* ========================================================================== */
 /*                        Deprecated Function Declarations                    */

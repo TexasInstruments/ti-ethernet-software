@@ -31,56 +31,28 @@
  */
 
 /*!
- * \file  dp83822_priv.h
+ * \file  phy_common_priv.c
  *
- * \brief This file contains private type definitions and helper macros for the
- *        DP83822 Ethernet PHY.
+ * \brief This file contains the implementation of common APIs for Ethernet PHY.
  */
-
-#ifndef DP83822_PRIV_H_
-#define DP83822_PRIV_H_
 
 /* ========================================================================== */
 /*                             Include Files                                  */
 /* ========================================================================== */
 
-#include <stdint.h>
+#include <stdio.h>
 #include "phy_common_priv.h"
 
-#ifdef __cplusplus
-extern "C" {
-#endif
 
 /* ========================================================================== */
-/*                                 Macros                                     */
+/*                           Macros & Typedefs                                */
 /* ========================================================================== */
 
-/*! \brief PHY Control Register #1 (CR1) */
-#define DP83822_CR1                           (0x09U)
-
-/*! \brief PHY Control Register (PHYCR) */
-#define DP83822_PHYCR                         (0x19U)
-
-/* CR1 register definitions */
-#define CR1_ROBUSTAUTOMDIX                    (0x0020U)
-
-/* PHYCR register definitions */
-#define PHYCR_AUTOMDIX_ENABLE                 (0x8000U)
-#define PHYCR_FORCEMDIX_MASK                  (0x4000U)
-#define PHYCR_FORCEMDIX_MDIX                  (0x4000U)
-#define PHYCR_FORCEMDIX_MDI                   (0x0000U)
 
 /* ========================================================================== */
-/*                         Structures and Enums                               */
+/*                         Structure Declarations                             */
 /* ========================================================================== */
 
-/* None */
-
-/* ========================================================================== */
-/*                         Global Variables Declarations                      */
-/* ========================================================================== */
-
-/* None */
 
 /* ========================================================================== */
 /*                          Function Declarations                             */
@@ -89,19 +61,22 @@ extern "C" {
 /* None */
 
 /* ========================================================================== */
-/*                        Deprecated Function Declarations                    */
+/*                            Global Variables                                */
 /* ========================================================================== */
 
-/* None */
 
 /* ========================================================================== */
-/*                       Static Function Definitions                          */
+/*                          Function Definitions                              */
 /* ========================================================================== */
 
-/* None */
-
-#ifdef __cplusplus
+Phy_RegAccessCb_t* PhyPriv_getRegAccessApi(EthPhyDrv_Handle hPhy)
+{
+    return &((Phy_Obj_t*) hPhy)->regAccessApi;
 }
-#endif
 
-#endif /* DP83822_PRIV_H_ */
+
+uint8_t PhyPriv_getPhyAddr(EthPhyDrv_Handle hPhy)
+{
+    return ((Phy_Obj_t*) hPhy)->phyAddr;
+}
+

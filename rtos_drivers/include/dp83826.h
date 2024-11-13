@@ -31,21 +31,32 @@
  */
 
 /*!
- * \file  dp83822_priv.h
+ * \file  dp83826.h
  *
- * \brief This file contains private type definitions and helper macros for the
- *        DP83822 Ethernet PHY.
+ * \brief This file contains the type definitions and helper macros for the
+ *        dp83826 Ethernet PHY.
  */
 
-#ifndef DP83822_PRIV_H_
-#define DP83822_PRIV_H_
+/*!
+ * \ingroup  DRV_ENETPHY
+ * \defgroup ENETPHY_dp83826 TI dp83826 PHY
+ *
+ * TI dp83826 RMII Ethernet PHY.
+ *
+ * @{
+ */
+
+#ifndef dp83826_H_
+#define dp83826_H_
 
 /* ========================================================================== */
 /*                             Include Files                                  */
 /* ========================================================================== */
 
 #include <stdint.h>
-#include "phy_common_priv.h"
+
+#include "phy_common.h"
+#include "port.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -55,26 +66,19 @@ extern "C" {
 /*                                 Macros                                     */
 /* ========================================================================== */
 
-/*! \brief PHY Control Register #1 (CR1) */
-#define DP83822_CR1                           (0x09U)
-
-/*! \brief PHY Control Register (PHYCR) */
-#define DP83822_PHYCR                         (0x19U)
-
-/* CR1 register definitions */
-#define CR1_ROBUSTAUTOMDIX                    (0x0020U)
-
-/* PHYCR register definitions */
-#define PHYCR_AUTOMDIX_ENABLE                 (0x8000U)
-#define PHYCR_FORCEMDIX_MASK                  (0x4000U)
-#define PHYCR_FORCEMDIX_MDIX                  (0x4000U)
-#define PHYCR_FORCEMDIX_MDI                   (0x0000U)
+/* None */
 
 /* ========================================================================== */
 /*                         Structures and Enums                               */
 /* ========================================================================== */
 
-/* None */
+/*!
+ * \brief dp83826 PHY configuration parameters.
+ */
+typedef struct Dp83826_Cfg_s
+{
+    /* No extended config parameters at the moment */
+} Dp83826_Cfg;
 
 /* ========================================================================== */
 /*                         Global Variables Declarations                      */
@@ -86,7 +90,32 @@ extern "C" {
 /*                          Function Declarations                             */
 /* ========================================================================== */
 
-/* None */
+/*!
+ * \brief Initialize dp83826 PHY specific config params.
+ *
+ * Initializes the dp83826 PHY specific configuration parameters.
+ *
+ * \param cfg       dp83826 PHY config structure pointer
+ */
+void Dp83826_initCfg(Dp83826_Cfg *cfg);
+
+void Dp83826_bind(EthPhyDrv_Handle* hPhy, 
+					uint8_t phyAddr, 
+					Phy_RegAccessCb_t* pRegAccessCb);
+
+bool Dp83826_isPhyDevSupported(EthPhyDrv_Handle hPhy, 
+                                const void *pVersion);
+
+bool Dp83826_isMacModeSupported(EthPhyDrv_Handle hPhy, 
+                                Phy_Mii mii);
+
+int32_t Dp83826_config(EthPhyDrv_Handle hPhy,
+                        const void *pExtCfg,
+                        const uint32_t extCfgSize,
+                        Phy_Mii mii, 
+                        bool loopbackEn);
+
+void Dp83826_printRegs(EthPhyDrv_Handle hPhy);
 
 /* ========================================================================== */
 /*                        Deprecated Function Declarations                    */
@@ -104,4 +133,6 @@ extern "C" {
 }
 #endif
 
-#endif /* DP83822_PRIV_H_ */
+#endif /* dp83826_H_ */
+
+/*! @} */

@@ -31,14 +31,14 @@
  */
 
 /*!
- * \file  dp83822_priv.h
+ * \file  dp83826_priv.h
  *
  * \brief This file contains private type definitions and helper macros for the
- *        DP83822 Ethernet PHY.
+ *        dp83826 Ethernet PHY.
  */
 
-#ifndef DP83822_PRIV_H_
-#define DP83822_PRIV_H_
+#ifndef dp83826_PRIV_H_
+#define dp83826_PRIV_H_
 
 /* ========================================================================== */
 /*                             Include Files                                  */
@@ -56,10 +56,10 @@ extern "C" {
 /* ========================================================================== */
 
 /*! \brief PHY Control Register #1 (CR1) */
-#define DP83822_CR1                           (0x09U)
+#define Dp83826_CR1                           (0x09U)
 
 /*! \brief PHY Control Register (PHYCR) */
-#define DP83822_PHYCR                         (0x19U)
+#define Dp83826_PHYCR                         (0x19U)
 
 /* CR1 register definitions */
 #define CR1_ROBUSTAUTOMDIX                    (0x0020U)
@@ -104,4 +104,4 @@ extern "C" {
 }
 #endif
 
-#endif /* DP83822_PRIV_H_ */
+#endif /* dp83826_PRIV_H_ */

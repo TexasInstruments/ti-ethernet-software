@@ -45,7 +45,7 @@
 /* ========================================================================== */
 
 #include <stdint.h>
-#include "enetphy_priv.h"
+#include "phy_common_priv.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -168,16 +168,16 @@ extern "C" {
 #define LEDCR1_LED3SEL_OFFSET                 (12U)
 
 /* CFG3 register definitions */
-#define CFG3_ROBUSTAUTOMDIX                   ENETPHY_BIT(9)
+#define CFG3_ROBUSTAUTOMDIX                   PHY_BIT(9)
 
 /* CTRL register definitions */
-#define CTRL_SWRESET                          ENETPHY_BIT(15)
-#define CTRL_SWRESTART                        ENETPHY_BIT(14)
+#define CTRL_SWRESET                          PHY_BIT(15)
+#define CTRL_SWRESTART                        PHY_BIT(14)
 
 /* RGMIICTL register definitions */
-#define RGMIICTL_RGMIIEN                      ENETPHY_BIT(7)
-#define RGMIICTL_TXCLKDLY                     ENETPHY_BIT(1)
-#define RGMIICTL_RXCLKDLY                     ENETPHY_BIT(0)
+#define RGMIICTL_RGMIIEN                      PHY_BIT(7)
+#define RGMIICTL_TXCLKDLY                     PHY_BIT(1)
+#define RGMIICTL_RXCLKDLY                     PHY_BIT(0)
 
 /* FLDTHRCFG register definitions */
 #define FLDTHRCFG_FLDTHR_MASK                 (0x0007U)

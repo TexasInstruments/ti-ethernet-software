@@ -55,6 +55,9 @@
 
 #include <stdint.h>
 
+#include "phy_common.h"
+#include "port.h"
+
 #ifdef __cplusplus
 extern "C" {
 #endif
@@ -96,6 +99,27 @@ typedef struct Dp83822_Cfg_s
  */
 void Dp83822_initCfg(Dp83822_Cfg *cfg);
 
+void Dp83822_bind(EthPhyDrv_Handle* hPhy, 
+                    uint8_t phyAddr, 
+                    Phy_RegAccessCb_t* pRegAccessCb);
+
+bool Dp83822_isPhyDevSupported(EthPhyDrv_Handle hPhy,
+                                const void *pVersion);
+
+bool Dp83822_isMacModeSupported(EthPhyDrv_Handle hPhy, 
+                                Phy_Mii mii);
+
+int32_t Dp83822_config(EthPhyDrv_Handle hPhy,
+                        const void *pExtCfg,
+                        const uint32_t extCfgSize,
+                        Phy_Mii mii, 
+                        bool loopbackEn);
+
+void Dp83822_reset(EthPhyDrv_Handle hPhy);
+
+bool Dp83822_isResetComplete(EthPhyDrv_Handle hPhy);
+
+void Dp83822_printRegs(EthPhyDrv_Handle hPhy);
 /* ========================================================================== */
 /*                        Deprecated Function Declarations                    */
 /* ========================================================================== */
