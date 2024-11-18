@@ -107,11 +107,11 @@ static void Dp83tc812_configIntr(EthPhyDrv_Handle hPhy, bool intrEn);
 /*                            Global Variables                                */
 /* ========================================================================== */
 
-Phy_DrvObj_t gEnetPhyDrvDp83tg720 =
+Phy_DrvObj_t gEnetPhyDrvDp83tc812 =
 {
     .fxn =
     {
-        .name               = "Dp83tg720",
+        .name               = "Dp83tc812",
         .bind               = Dp83tc812_bind,
     	.isPhyDevSupported  = Dp83tc812_isPhyDevSupported,
     	.isMacModeSupported = Dp83tc812_isMacModeSupported,
