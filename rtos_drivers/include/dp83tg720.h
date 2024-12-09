@@ -166,4 +166,4 @@ void Dp83tg720_printRegs(EthPhyDrv_Handle hPhy);
 
 #endif /* DP83TG720_H_ */
 
-/* @} */
+/*! @} */

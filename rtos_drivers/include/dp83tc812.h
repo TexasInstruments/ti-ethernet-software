@@ -166,4 +166,4 @@ void Dp83tc812_printRegs(EthPhyDrv_Handle hPhy);
 
 #endif /* DP83TC812_H_ */
 
-/* @} */
+/*! @} */

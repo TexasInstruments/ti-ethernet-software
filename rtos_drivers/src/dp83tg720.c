@@ -640,7 +640,7 @@ static void Dp83tg720_configIntr(EthPhyDrv_Handle hPhy, bool intrEn)
     Phy_RegAccessCb_t* pRegAccessApi = PhyPriv_getRegAccessApi(hPhy);
 	
 	if (intrEn) {
-		PHYTRACE_DBG("PHY %u: Enable interrupts\n",phyAddr);
+		PHYTRACE_DBG("PHY %u: Enable interrupts\n", PhyPriv_getPhyAddr(hPhy));
 		status = pRegAccessApi->EnetPhy_readReg(pRegAccessApi->pArgs, MII_DP83TG720_INT_STAT1, &reg_val);
         if (status != PHY_SOK)
 			return;

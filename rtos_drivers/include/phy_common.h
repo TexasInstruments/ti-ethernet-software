@@ -31,12 +31,13 @@
  */
 
 /*!
- * \file  phy_common.h
+ * \ingroup DRV_ENETPHY
+ * \defgroup PHY_COMMON_H TI ENET PHY
  *
- * \brief This file contains the type definitions and helper macros common for the
- *        Ethernet PHY.
+ * TI PHY COMMON for Ethernet PHY.
+ *
+ * @{
  */
-
 #ifndef PHY_COMMON_H_
 #define PHY_COMMON_H_
 
@@ -55,7 +56,7 @@ extern "C" {
 /*                                 Macros                                     */
 /* ========================================================================== */
 
-#define ETHPHYDRV_MAX_OBJ_SIZE ((6*4) + 1 + 3) /* to meet the size of Phy_Obj_t */
+#define ETHPHYDRV_MAX_OBJ_SIZE            (64) /* to meet the size of Phy_Obj_t */
 
 /*! \brief Macro to perform round-up division. */
 #define PHY_DIV_ROUNDUP(val, div)         (((val) + (div) - 1) / (div))
@@ -521,7 +522,7 @@ typedef struct
         /*!
          * \brief Get PHY status frame header.
          *
-         * Optional PHY function to process PHY status frame.
+         * Optional PHY function to get the Ethernet header of the PHY status frame.
          * This function can only be supported when the PHY has a built-in PTP clock.
          *
          * \param hPhy     PHY device handle

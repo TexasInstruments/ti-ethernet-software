@@ -312,7 +312,7 @@ static void Dp83tc812_setLoopbackCfg(EthPhyDrv_Handle hPhy,
     uint16_t val;
     Phy_RegAccessCb_t* pRegAccessApi = PhyPriv_getRegAccessApi(hPhy);
 
-    PHYTRACE_DBG("PHY %u: %s loopback\n", phyAddr, enable ? "enable" : "disable");
+    PHYTRACE_DBG("PHY %u: %s loopback\n", PhyPriv_getPhyAddr(hPhy), enable ? "enable" : "disable");
 
 	status = pRegAccessApi->EnetPhy_readReg(pRegAccessApi->pArgs, PHY_BMCR, &val);
 	if(status != PHY_SOK && enable)
@@ -475,23 +475,23 @@ static void Dp83tc812_readStraps(EthPhyDrv_Handle hPhy, Dp83tc812_MasterSlaveMod
 		else
 		{
 			dp83tc812_params.is_master = false;
-			PHYTRACE_DBG("PHY %u: Strap: Slave Mode enabled\n",phyAddr);
+			PHYTRACE_DBG("PHY %u: Strap: Slave Mode enabled\n", PhyPriv_getPhyAddr(hPhy));
 		}
 	}
 
 	if (strap & DP83TC812_RGMII_IS_EN)
 	{
-		PHYTRACE_DBG("PHY %u: Strap: RGMII Mode enabled\n",phyAddr);
+		PHYTRACE_DBG("PHY %u: Strap: RGMII Mode enabled\n", PhyPriv_getPhyAddr(hPhy));
 		if (((strap & DP83TC812_TX_RX_SHIFT) == DP83TC812_TX_RX_SHIFT_EN) ||
 			((strap & DP83TC812_TX_RX_SHIFT) == DP83TC812_TX_SHIFT_EN))
-			PHYTRACE_DBG("PHY %u: Strap: TX Clock Shift enabled\n",phyAddr);
+			PHYTRACE_DBG("PHY %u: Strap: TX Clock Shift enabled\n", PhyPriv_getPhyAddr(hPhy));
 		if (((strap & DP83TC812_TX_RX_SHIFT) == DP83TC812_TX_RX_SHIFT_EN) ||
 			((strap & DP83TC812_TX_RX_SHIFT) == DP83TC812_RX_SHIFT_EN))
-			PHYTRACE_DBG("PHY %u: Strap: RX Clock Shift enabled\n",phyAddr);
+			PHYTRACE_DBG("PHY %u: Strap: RX Clock Shift enabled\n", PhyPriv_getPhyAddr(hPhy));
 	}
 	else
 	{
-		PHYTRACE_DBG("PHY %u: Strap: SGMII Mode enabled\n",phyAddr);
+		PHYTRACE_DBG("PHY %u: Strap: SGMII Mode enabled\n", PhyPriv_getPhyAddr(hPhy));
 	}
 
 };
@@ -507,7 +507,6 @@ static void Dp83tc812_writeSeq(EthPhyDrv_Handle hPhy, const struct dp83tc812_ini
 static void Dp83tc812_chipInit(EthPhyDrv_Handle hPhy)
 {
 	bool complete = false;
-	// uint8_t phyAddr = PhyPriv_getPhyAddr(hPhy);
 
 	/* Perform a hardware reset prior to configuration */
 	Dp83tc812_resetHw(hPhy);
