@@ -241,6 +241,7 @@ int32_t Dp83tc812_config(EthPhyDrv_Handle hPhy,
         PHYTRACE_ERR("PHY %u: invalid config params (cfg=%p, size=%u)\n",
                         phyAddr, extendedCfg, extendedCfgSize);
         status = PHY_EINVALIDPARAMS;
+		return status;
     }
 
 	/* Read strap register */
