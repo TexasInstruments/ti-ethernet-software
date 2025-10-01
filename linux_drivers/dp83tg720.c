@@ -1,896 +1,612 @@
-// SPDX-License-Identifier: GPL-2.0-only
+// SPDX-License-Identifier: GPL-2.0
 /* Driver for the Texas Instruments DP83TG720 PHY
- * Copyright (C) 2020 Texas Instruments Incorporated - http://www.ti.com/
+ * Copyright (c) 2023 Pengutronix, Oleksij Rempel <kernel@pengutronix.de>
  */
-/* 	10/05/2023 Alvaro Reyes (a-reyes1@ti.com)
- *	Updated Open Alliance set up script for 720/721 in both Master and Slave
- *	Added SQI, TDR, and Forced-Master/Slave features
- *  
- *  02/08/2024 Alvaro Reyes (a-reyes1@ti.com)
- * 
- *  New Global variables
- *  Functions Updated
- *  #if 0 #endif added to dp83720_handle_interuppt
- *  dp83720_config_aneg
- *  dp83720_reset
- *  dp83720_chip_init
- */
- 
-
-#include <linux/ethtool.h>
+#include <linux/bitfield.h>
 #include <linux/ethtool_netlink.h>
-#include <linux/etherdevice.h>
+#include <linux/jiffies.h>
 #include <linux/kernel.h>
-#include <linux/mii.h>
-#include <linux/mdio.h>
 #include <linux/module.h>
-#include <linux/of.h>
 #include <linux/phy.h>
-#include <linux/netdevice.h>
+#include <linux/random.h>
 
-#define DP83TG720_CS_1_1_PHY_ID			0x2000a284
-#define DP83TG721_CS_1_0_PHY_ID			0x2000a290
-#define MMD1F							0x1f
-#define MMD1							0x1
+#include "open_alliance_helpers.h"
 
-#define MII_DP83TG720_INT_STAT1			0x12
-#define MII_DP83TG720_INT_STAT2			0x13
-#define MII_DP83TG720_INT_STAT3			0x18
-#define MII_DP83TG720_RESET_CTRL		0x1f
+/*
+ * DP83TG720S_POLL_ACTIVE_LINK - Polling interval in milliseconds when the link
+ *				 is active.
+ * DP83TG720S_POLL_NO_LINK     - Polling interval in milliseconds when the
+ *				 link is down.
+ * DP83TG720S_FAST_POLL_DURATION_MS - Timeout in milliseconds for no-link
+ *				 polling after which polling interval is
+ *				 increased.
+ * DP83TG720S_POLL_SLOW	       - Slow polling interval when there is no
+ *				 link for a prolongued period.
+ * DP83TG720S_RESET_DELAY_MS_MASTER - Delay after a reset before attempting
+ *				 to establish a link again for master phy.
+ * DP83TG720S_RESET_DELAY_MS_SLAVE  - Delay after a reset before attempting
+ *				 to establish a link again for slave phy.
+ */
+#define DP83TG720S_POLL_ACTIVE_LINK		421
+#define DP83TG720S_POLL_NO_LINK			149
+#define DP83TG720S_FAST_POLL_DURATION_MS	6000
+#define DP83TG720S_POLL_SLOW			1117
+#define DP83TG720S_RESET_DELAY_MS_MASTER	97
+#define DP83TG720S_RESET_DELAY_MS_SLAVE		149
 
-#define PMA_PMD_CONTROL					0x1834
-#define DP83TG720_TDR_CFG5				0x0306
-#define DP83TG720_CDCR					0x1E
-#define TDR_DONE						BIT(1)
-#define TDR_FAIL						BIT(0)
-#define DP83TG720_TDR_TC1				0x310
-#define DP83TG720_TDR_START_BIT			BIT(15)	
-#define BRK_MS_CFG						BIT(14)
-#define PEAK_DETECT						BIT(7)
-#define PEAK_SIGN						BIT(6)
+#define DP83TG720S_PHY_ID			0x2000a284
 
-#define DP83TG720_HW_RESET				BIT(15)
-#define DP83TG720_SW_RESET				BIT(14)
+/* MDIO_MMD_VEND2 registers */
+#define DP83TG720S_MII_REG_10			0x10
+#define DP83TG720S_STS_MII_INT			BIT(7)
+#define DP83TG720S_LINK_STATUS			BIT(0)
 
-#define DP83TG720_STRAP					0x45d
-#define DP83TG720_SGMII_CTRL			0x608
-#define SGMII_CONFIG_VAL				0x027B
+/* TDR Configuration Register (0x1E) */
+#define DP83TG720S_TDR_CFG			0x1e
+/* 1b = TDR start, 0b = No TDR */
+#define DP83TG720S_TDR_START			BIT(15)
+/* 1b = TDR auto on link down, 0b = Manual TDR start */
+#define DP83TG720S_CFG_TDR_AUTO_RUN		BIT(14)
+/* 1b = TDR done, 0b = TDR in progress */
+#define DP83TG720S_TDR_DONE			BIT(1)
+/* 1b = TDR fail, 0b = TDR success */
+#define DP83TG720S_TDR_FAIL			BIT(0)
 
-/* INT_STAT1 bits */
-#define DP83TG720_ANEG_COMPLETE_INT_EN	BIT(2)
-#define DP83TG720_ESD_EVENT_INT_EN		BIT(3)
-#define DP83TG720_LINK_STAT_INT_EN		BIT(5)
-#define DP83TG720_ENERGY_DET_INT_EN		BIT(6)
-#define DP83TG720_LINK_QUAL_INT_EN		BIT(7)
+#define DP83TG720S_PHY_RESET			0x1f
+#define DP83TG720S_HW_RESET			BIT(15)
 
-/* INT_STAT2 bits */
-#define DP83TG720_SLEEP_MODE_INT_EN		BIT(2)
-#define DP83TG720_OVERTEMP_INT_EN		BIT(3)
-#define DP83TG720_OVERVOLTAGE_INT_EN	BIT(6)
-#define DP83TG720_UNDERVOLTAGE_INT_EN	BIT(7)
+#define DP83TG720S_LPS_CFG3			0x18c
+/* Power modes are documented as bit fields but used as values */
+/* Power Mode 0 is Normal mode */
+#define DP83TG720S_LPS_CFG3_PWR_MODE_0		BIT(0)
 
-/* INT_STAT3 bits */
-#define DP83TG720_LPS_INT_EN			BIT(0)
-#define DP83TG720_WAKE_REQ_EN			BIT(1)
-#define DP83TG720_NO_FRAME_INT_EN		BIT(2)
-#define DP83TG720_POR_DONE_INT_EN		BIT(3)
+/* Open Aliance 1000BaseT1 compatible HDD.TDR Fault Status Register */
+#define DP83TG720S_TDR_FAULT_STATUS		0x30f
 
-/* SGMII CTRL bits */
-#define DP83TG720_SGMII_AUTO_NEG_EN		BIT(0)
-#define DP83TG720_SGMII_EN				BIT(9)
+/* Register 0x0301: TDR Configuration 2 */
+#define DP83TG720S_TDR_CFG2			0x301
 
-/* Strap bits */
-#define DP83TG720_MASTER_MODE			BIT(5)
-#define DP83TG720_RGMII_IS_EN			BIT(12)
-#define DP83TG720_SGMII_IS_EN			BIT(13)
-#define DP83TG720_RX_SHIFT_EN			BIT(14)
-#define DP83TG720_TX_SHIFT_EN			BIT(15)
+/* Register 0x0303: TDR Configuration 3 */
+#define DP83TG720S_TDR_CFG3			0x303
 
-/* RGMII ID CTRL */
-#define DP83TG720_RGMII_ID_CTRL			0x602
-#define DP83TG720_RX_CLK_SHIFT			BIT(1)
-#define DP83TG720_TX_CLK_SHIFT			BIT(0)
+/* Register 0x0304: TDR Configuration 4 */
+#define DP83TG720S_TDR_CFG4			0x304
 
-/* SQI Status Bits */
-#define DP83TG720_sqi_reg_1				0x871
-#define MAX_SQI_VALUE					0x7
+/* Register 0x0405: Unknown Register */
+#define DP83TG720S_UNKNOWN_0405			0x405
 
-enum DP83TG720_chip_type {
-	DP83TG720_CS1_1,
-	DP83TG721_CS1,
+#define DP83TG720S_LINK_QUAL_3			0x547
+#define DP83TG720S_LINK_LOSS_CNT_MASK		GENMASK(15, 10)
+
+/* Register 0x0576: TDR Master Link Down Control */
+#define DP83TG720S_TDR_MASTER_LINK_DOWN		0x576
+
+#define DP83TG720S_RGMII_DELAY_CTRL		0x602
+/* In RGMII mode, Enable or disable the internal delay for RXD */
+#define DP83TG720S_RGMII_RX_CLK_SEL		BIT(1)
+/* In RGMII mode, Enable or disable the internal delay for TXD */
+#define DP83TG720S_RGMII_TX_CLK_SEL		BIT(0)
+
+/*
+ * DP83TG720S_PKT_STAT_x registers correspond to similarly named registers
+ * in the datasheet (PKT_STAT_1 through PKT_STAT_6). These registers store
+ * 32-bit or 16-bit counters for TX and RX statistics and must be read in
+ * sequence to ensure the counters are cleared correctly.
+ *
+ * - DP83TG720S_PKT_STAT_1: Contains TX packet count bits [15:0].
+ * - DP83TG720S_PKT_STAT_2: Contains TX packet count bits [31:16].
+ * - DP83TG720S_PKT_STAT_3: Contains TX error packet count.
+ * - DP83TG720S_PKT_STAT_4: Contains RX packet count bits [15:0].
+ * - DP83TG720S_PKT_STAT_5: Contains RX packet count bits [31:16].
+ * - DP83TG720S_PKT_STAT_6: Contains RX error packet count.
+ *
+ * Keeping the register names as defined in the datasheet helps maintain
+ * clarity and alignment with the documentation.
+ */
+#define DP83TG720S_PKT_STAT_1			0x639
+#define DP83TG720S_PKT_STAT_2			0x63a
+#define DP83TG720S_PKT_STAT_3			0x63b
+#define DP83TG720S_PKT_STAT_4			0x63c
+#define DP83TG720S_PKT_STAT_5			0x63d
+#define DP83TG720S_PKT_STAT_6			0x63e
+
+/* Register 0x083F: Unknown Register */
+#define DP83TG720S_UNKNOWN_083F			0x83f
+
+#define DP83TG720S_SQI_REG_1			0x871
+#define DP83TG720S_SQI_OUT_WORST		GENMASK(7, 5)
+#define DP83TG720S_SQI_OUT			GENMASK(3, 1)
+
+#define DP83TG720_SQI_MAX			7
+
+struct dp83tg720_stats {
+	u64 link_loss_cnt;
+	u64 tx_pkt_cnt;
+	u64 tx_err_pkt_cnt;
+	u64 rx_pkt_cnt;
+	u64 rx_err_pkt_cnt;
 };
 
-struct DP83TG720_init_reg {
-	int MMD;
-	int reg;
-	int val;
+struct dp83tg720_priv {
+	struct dp83tg720_stats stats;
+	unsigned long last_link_down_jiffies;
 };
 
-static const struct DP83TG720_init_reg DP83TG720_cs1_1_master_init[] = {
-	{0x1F, 0x001F, 0X8000},
-	{0x1F, 0x0573, 0x0101},
-	{0x1, 0x0834, 0xC001},
-	{0x1F, 0x0405, 0x5800},
-	{0x1F, 0x08AD, 0x3C51},
-	{0x1F, 0x0894, 0x5DF7},
-	{0x1F, 0x08A0, 0x09E7},
-	{0x1F, 0x08C0, 0x4000},
-	{0x1F, 0x0814, 0x4800},
-	{0x1F, 0x080D, 0x2EBF},
-	{0x1F, 0x08C1, 0x0B00},
-	{0x1F, 0x087D, 0x0001},
-	{0x1F, 0x082E, 0x0000},
-	{0x1F, 0x0837, 0x00F4},
-	{0x1F, 0x08BE, 0x0200},
-	{0x1F, 0x08C5, 0x4000},
-	{0x1F, 0x08C7, 0x2000},
-	{0x1F, 0x08B3, 0x005A},
-	{0x1F, 0x08B4, 0x005A},
-	{0x1F, 0x08B0, 0x0202},
-	{0x1F, 0x08B5, 0x00EA},
-	{0x1F, 0x08BA, 0x2828},
-	{0x1F, 0x08BB, 0x6828},
-	{0x1F, 0x08BC, 0x0028},
-	{0x1F, 0x08BF, 0x0000},
-	{0x1F, 0x08B1, 0x0014},
-	{0x1F, 0x08B2, 0x0008},
-	{0x1F, 0x08EC, 0x0000},
-	{0x1F, 0x08C8, 0x0003},
-	{0x1F, 0x08BE, 0x0201},
-	{0x1F, 0x018C, 0x0001},
-	{0x1F, 0x001F, 0x4000},
-	{0x1F, 0x0573, 0x0001},
-	{0x1F, 0x056A, 0x5F41},
-};
-
-static const struct DP83TG720_init_reg DP83TG720_cs1_1_slave_init[] = {
-	{0x1F, 0x001F, 0x8000},
-	{0x1F, 0x0573, 0x0101},
-	{0x1, 0x0834, 0x8001},
-	{0x1F, 0x0894, 0x5DF7},
-	{0x1F, 0x056a, 0x5F40},
-	{0x1F, 0x0405, 0x5800},
-	{0x1F, 0x08AD, 0x3C51},
-	{0x1F, 0x0894, 0x5DF7},
-	{0x1F, 0x08A0, 0x09E7},
-	{0x1F, 0x08C0, 0x4000},
-	{0x1F, 0x0814, 0x4800},
-	{0x1F, 0x080D, 0x2EBF},
-	{0x1F, 0x08C1, 0x0B00},
-	{0x1F, 0x087d, 0x0001},
-	{0x1F, 0x082E, 0x0000},
-	{0x1F, 0x0837, 0x00f4},
-	{0x1F, 0x08BE, 0x0200},
-	{0x1F, 0x08C5, 0x4000},
-	{0x1F, 0x08C7, 0x2000},
-	{0x1F, 0x08B3, 0x005A},
-	{0x1F, 0x08B4, 0x005A},
-	{0x1F, 0x08B0, 0x0202},
-	{0x1F, 0x08B5, 0x00EA},
-	{0x1F, 0x08BA, 0x2828},
-	{0x1F, 0x08BB, 0x6828},
-	{0x1F, 0x08BC, 0x0028},
-	{0x1F, 0x08BF, 0x0000},
-	{0x1F, 0x08B1, 0x0014},
-	{0x1F, 0x08B2, 0x0008},
-	{0x1F, 0x08EC, 0x0000},
-	{0x1F, 0x08C8, 0x0003},
-	{0x1F, 0x08BE, 0x0201},
-	{0x1F, 0x056A, 0x5F40},
-	{0x1F, 0x018C, 0x0001},
-	{0x1F, 0x001F, 0x4000},
-	{0x1F, 0x0573, 0x0001},
-	{0x1F, 0x056A, 0X5F41},
-};
-
-static const struct DP83TG720_init_reg DP83TG721_cs1_master_init[] = {
-	{0x1F, 0x001F, 0x8000},
-	{0x1F, 0x0573, 0x0801},
-	{0x1, 0x0834, 0xC001},
-	{0x1F, 0x0405, 0x6C00},
-	{0x1F, 0x08AD, 0x3C51},
-	{0x1F, 0x0894, 0x5DF7},
-	{0x1F, 0x08A0, 0x09E7},
-	{0x1F, 0x08C0, 0x4000},
-	{0x1F, 0x0814, 0x4800},
-	{0x1F, 0x080D, 0x2EBF},
-	{0x1F, 0x08C1, 0x0B00},
-	{0x1F, 0x087D, 0x0001},
-	{0x1F, 0x082E, 0x0000},
-	{0x1F, 0x0837, 0x00F8},
-	{0x1F, 0x08BE, 0x0200},
-	{0x1F, 0x08C5, 0x4000},
-	{0x1F, 0x08C7, 0x2000},
-	{0x1F, 0x08B3, 0x005A},
-	{0x1F, 0x08B4, 0x005A},
-	{0x1F, 0x08B0, 0x0202},
-	{0x1F, 0x08B5, 0x00EA},
-	{0x1F, 0x08BA, 0x2828},
-	{0x1F, 0x08BB, 0x6828},
-	{0x1F, 0x08BC, 0x0028},
-	{0x1F, 0x08BF, 0x0000},
-	{0x1F, 0x08B1, 0x0014},
-	{0x1F, 0x08B2, 0x0008},
-	{0x1F, 0x08EC, 0x0000},
-	{0x1F, 0x08FC, 0x0091},
-	{0x1F, 0x08BE, 0x0201},
-	{0x1F, 0x0335, 0x0010},
-	{0x1F, 0x0336, 0x0009},
-	{0x1F, 0x0337, 0x0208},
-	{0x1F, 0x0338, 0x0208},
-	{0x1F, 0x0339, 0x02CB},
-	{0x1F, 0x033A, 0x0208},
-	{0x1F, 0x033B, 0x0109},
-	{0x1F, 0x0418, 0x0380},
-	{0x1F, 0x0420, 0xFF10},
-	{0x1F, 0x0421, 0x4033},
-	{0x1F, 0x0422, 0x0800},
-	{0x1F, 0x0423, 0x0002},
-	{0x1F, 0x0484, 0x0003},
-	{0x1F, 0x055D, 0x0008},
-	{0x1F, 0x042B, 0x0018},
-	{0x1F, 0x087C, 0x0080},
-	{0x1F, 0x08C1, 0x0900},
-	{0x1F, 0x08fc, 0x4091},
-	{0x1F, 0x0881, 0x5146},
-	{0x1F, 0x08be, 0x02a1},
-	{0x1F, 0x0867, 0x9999},
-	{0x1F, 0x0869, 0x9666},
-	{0x1F, 0x086a, 0x0009},
-	{0x1F, 0x0822, 0x11e1},
-	{0x1F, 0x08f9, 0x1f11},
-	{0x1F, 0x08a3, 0x24e8},
-	{0x1F, 0x018C, 0x0001},
-	{0x1F, 0x001F, 0x4000},
-	{0x1F, 0x0573, 0x0001},
-	{0x1F, 0x056A, 0x5F41},
-};
-
-static const struct DP83TG720_init_reg DP83TG721_cs1_slave_init[] = {
-	{0x1F, 0x001F, 0x8000},
-	{0x1F, 0x0573, 0x0801},
-	{0x1, 0x0834, 0x8001},
-	{0x1F, 0x0405, 0X6C00},
-	{0x1F, 0x08AD, 0x3C51},
-	{0x1F, 0x0894, 0x5DF7},
-	{0x1F, 0x08A0, 0x09E7},
-	{0x1F, 0x08C0, 0x4000},
-	{0x1F, 0x0814, 0x4800},
-	{0x1F, 0x080D, 0x2EBF},
-	{0x1F, 0x08C1, 0x0B00},
-	{0x1F, 0x087D, 0x0001},
-	{0x1F, 0x082E, 0x0000},
-	{0x1F, 0x0837, 0x00F8},
-	{0x1F, 0x08BE, 0x0200},
-	{0x1F, 0x08C5, 0x4000},
-	{0x1F, 0x08C7, 0x2000},
-	{0x1F, 0x08B3, 0x005A},
-	{0x1F, 0x08B4, 0x005A},
-	{0x1F, 0x08B0, 0x0202},
-	{0x1F, 0x08B5, 0x00EA},
-	{0x1F, 0x08BA, 0x2828},
-	{0x1F, 0x08BB, 0x6828},
-	{0x1F, 0x08BC, 0x0028},
-	{0x1F, 0x08BF, 0x0000},
-	{0x1F, 0x08B1, 0x0014},
-	{0x1F, 0x08B2, 0x0008},
-	{0x1F, 0x08EC, 0x0000},
-	{0x1F, 0x08FC, 0x0091},
-	{0x1F, 0x08BE, 0x0201},
-	{0x1F, 0x0456, 0x0160},
-	{0x1F, 0x0335, 0x0010},
-	{0x1F, 0x0336, 0x0009},
-	{0x1F, 0x0337, 0x0208},
-	{0x1F, 0x0338, 0x0208},
-	{0x1F, 0x0339, 0x02CB},
-	{0x1F, 0x033A, 0x0208},
-	{0x1F, 0x033B, 0x0109},
-	{0x1F, 0x0418, 0x0380},
-	{0x1F, 0x0420, 0xFF10},
-	{0x1F, 0x0421, 0x4033},
-	{0x1F, 0x0422, 0x0800},
-	{0x1F, 0x0423, 0x0002},
-	{0x1F, 0x0484, 0x0003},
-	{0x1F, 0x055D, 0x0008},
-	{0x1F, 0x042B, 0x0018},
-	{0x1F, 0x082D, 0x120F},
-	{0x1F, 0x0888, 0x0438},
-	{0x1F, 0x0824, 0x09E0},
-	{0x1F, 0x0883, 0x5146},
-	{0x1F, 0x08BE, 0x02A1},
-	{0x1F, 0x0822, 0x11E1},
-	{0x1F, 0x056A, 0x5F40},
-	{0x1F, 0x08C1, 0x0900},
-	{0x1F, 0x08FC, 0x4091},
-	{0x1F, 0x08F9, 0x1F11},
-	{0x1F, 0x084F, 0x290C},
-	{0x1F, 0x0850, 0x3D33},
-	{0x1F, 0x018C, 0x0001},
-	{0x1F, 0x001F, 0x4000},
-	{0x1F, 0x0573, 0x0001},
-	{0x1F, 0x056A, 0x5F41},
-};
-
-static const struct DP83TG720_init_reg DP83TG720_tdr_config_init[] = {
-	{0x1F, 0x301, 0xA008},
-	{0x1F, 0x303, 0x0928},
-	{0x1F, 0x304, 0x0004},
-	{0x1F, 0x405, 0x6400},
-};
-
-struct DP83TG720_private {
-	int chip;
-	bool is_master;
-	bool is_rgmii;
-	bool is_sgmii;
-	bool rx_shift;
-	bool tx_shift;
-};
-
-static int DP83TG720_read_straps(struct phy_device *phydev)
+/**
+ * dp83tg720_update_stats - Update the PHY statistics for the DP83TD510 PHY.
+ * @phydev: Pointer to the phy_device structure.
+ *
+ * The function reads the PHY statistics registers and updates the statistics
+ * structure.
+ *
+ * Returns: 0 on success or a negative error code on failure.
+ */
+static int dp83tg720_update_stats(struct phy_device *phydev)
 {
-	struct DP83TG720_private *DP83TG720 = phydev->priv;
-	int strap;
-
-	strap = phy_read_mmd(phydev, MMD1F, DP83TG720_STRAP);
-	if (strap < 0)
-		return strap;
-
-	if (strap & DP83TG720_MASTER_MODE)
-		DP83TG720->is_master = true;
-
-	if (strap & DP83TG720_RGMII_IS_EN)
-		DP83TG720->is_rgmii = true;
-
-	if (strap & DP83TG720_SGMII_IS_EN)
-		DP83TG720->is_sgmii = true;
-
-	if (strap & DP83TG720_RX_SHIFT_EN)
-		DP83TG720->rx_shift = true;
-
-	if (strap & DP83TG720_TX_SHIFT_EN)
-		DP83TG720->tx_shift = true;
-
-	return 0;
-};
-
-static int DP83TG720_reset(struct phy_device *phydev, bool hw_reset)
-{
+	struct dp83tg720_priv *priv = phydev->priv;
+	u32 count;
 	int ret;
 
-	if (hw_reset)
-		ret = phy_write_mmd(phydev, MMD1F, MII_DP83TG720_RESET_CTRL,
-				DP83TG720_HW_RESET);
-	else
-		ret = phy_write_mmd(phydev, MMD1F, MII_DP83TG720_RESET_CTRL,
-				DP83TG720_SW_RESET);
-	if (ret)
-		return ret;
-
-	mdelay(100);
-
-	return 0;
-}
-
-static int DP83TG720_phy_reset(struct phy_device *phydev)
-{
-	int ret;
-
-	ret = DP83TG720_reset(phydev, false);
-	if (ret)
-		return ret;
-
-	ret = DP83TG720_read_straps(phydev);
-	if (ret)
-		return ret;
-
-	return 0;
-}
-
-static int DP83TG720_write_seq(struct phy_device *phydev,
-			     const struct DP83TG720_init_reg *init_data, int size)
-{
-	int ret;
-	int i;
-
-	for (i = 0; i < size; i++) {
-			ret = phy_write_mmd(phydev, init_data[i].MMD, init_data[i].reg,
-				init_data[i].val);
-			if (ret)
-					return ret;
-	}
-
-	return 0;
-}
-
-static int DP83TG720_setup_master_slave(struct phy_device *phydev)
-{
-	switch(phydev->master_slave_set)
-	{
-		case MASTER_SLAVE_CFG_MASTER_FORCE:
-		case MASTER_SLAVE_CFG_MASTER_PREFERRED:
-			return phy_write_mmd(phydev, MMD1, 0x0834, 0xC001);
-		case MASTER_SLAVE_CFG_SLAVE_FORCE:
-		case MASTER_SLAVE_CFG_SLAVE_PREFERRED:
-			return phy_write_mmd(phydev, MMD1, 0x0834,0x8001);
-		case MASTER_SLAVE_CFG_UNKNOWN:
-		case MASTER_SLAVE_CFG_UNSUPPORTED:
-		default:
-			return 0;	
-	}
-}
-
-static int DP83TG720_read_master_slave(struct phy_device *phydev)
-{
-	int ctrl2 = phy_read_mmd(phydev, MMD1, PMA_PMD_CONTROL);
-	if (ctrl2 < 0)
-		return ctrl2;
-	
-	if (ctrl2 & BRK_MS_CFG){
-		phydev->master_slave_get = MASTER_SLAVE_CFG_MASTER_FORCE;
-		phydev->master_slave_state = MASTER_SLAVE_STATE_MASTER;
-		return 1;
-	} else {
-		phydev->master_slave_get = MASTER_SLAVE_CFG_SLAVE_FORCE;
-		phydev->master_slave_state = MASTER_SLAVE_STATE_SLAVE;
-		return 0;
-	}
-
-	return 0;
-}
-
-static int DP83TG720_read_status(struct phy_device *phydev)
-{
-	int ret;
-
-	ret = genphy_read_status(phydev);
-	if (ret)
-		return ret;
-	
-	ret = DP83TG720_read_master_slave(phydev);
-
-	return 0;
-}
-
-static int DP83TG720_sqi(struct phy_device *phydev){
-	int sqi;
-
-	sqi = phy_read_mmd(phydev,MMD1F,DP83TG720_sqi_reg_1);
-
-	if(sqi < 0){
-		printk("Invalid Value.\n");
-		return sqi;
-	}
-	sqi = (sqi >> 1) & 0x7;
-
-	return sqi;
-}
-
-static int DP83TG720_sqi_max(struct phy_device *phydev){
-	return MAX_SQI_VALUE;
-}
-
-static int DP83TG720_cable_test_start(struct phy_device *phydev){
-	
-	if(DP83TG720_read_master_slave(phydev))
-	{
-		phy_write_mmd(phydev, MMD1F, 0x0576, 0x0400);
-		msleep(100);
-		printk("PHY is set as Master.\n");
-	} else
-	{
-		printk("PHY is set as Slave. \n)");
-	}
-
-	DP83TG720_write_seq(phydev,DP83TG720_tdr_config_init, ARRAY_SIZE(DP83TG720_tdr_config_init));
-
-	phy_write_mmd(phydev, MMD1F, DP83TG720_CDCR, DP83TG720_TDR_START_BIT);
-
-	msleep(100);
-
-	return 0;
-}
-
-static int DP83TG720_cable_test_report_trans(u32 result) {
-	int length_of_fault = 0, TDR_STATE = 0;
-	
-	length_of_fault = (result & 0x3F00) >> 8;
-	TDR_STATE = (result & 0xF0) >> 4;
-	switch(TDR_STATE){
-		case 3:
-			printk("Short detected. \n");
-			break;
-		case 5:
-			printk("Noise detected. \n");
-			break;
-		case 6:
-			printk("Open detected. \n");
-			break;
-		case 7:
-			printk("No fault detected. Cable OK \n");
-			break;
-		case 8:
-			printk("Test in progress; initial value with TDR ON \n");
-			break;
-		case 13:
-			printk("Test not possible (for example, noise, active link) \n");
-			break;
-		default :
-			printk("Invalid value read.\n");
-			break;
-	}
-	printk("Length of Fault: %d Meters\n", length_of_fault);
-	return ETHTOOL_A_CABLE_RESULT_CODE_OK;	
-}
-
-static int DP83TG720_cable_test_report(struct phy_device *phydev)
-{
-	int ret;
-	ret = phy_read_mmd(phydev, MMD1F, 0x030F);
-
+	/* Read the link loss count */
+	ret = phy_read_mmd(phydev, MDIO_MMD_VEND2, DP83TG720S_LINK_QUAL_3);
 	if (ret < 0)
 		return ret;
-	ethnl_cable_test_result(phydev, ETHTOOL_A_CABLE_PAIR_A, DP83TG720_cable_test_report_trans(ret));
+	/* link_loss_cnt */
+	count = FIELD_GET(DP83TG720S_LINK_LOSS_CNT_MASK, ret);
+	priv->stats.link_loss_cnt += count;
 
-	return 0;
-}
-
-static int DP83TG720_cable_test_get_status(struct phy_device *phydev, bool *finished){
-	int statusReg;
-	int TDR_Done;
-	int TDR_Fail;
-	*finished = false;
-	statusReg = phy_read_mmd(phydev, MMD1F, DP83TG720_CDCR);
-	
-	TDR_Done = statusReg & TDR_DONE;
-	TDR_Fail = statusReg & TDR_FAIL;
-
-	if(TDR_Done && !TDR_Fail){
-		*finished = true;
-		printk("TDR HAS COMPLETED AND PASSED\n");
-		phy_write_mmd(phydev, MMD1F, 0x0576, 0x0000);
-		return DP83TG720_cable_test_report(phydev);
-	}
-	else if (TDR_Fail){
-		printk("TDR HAS FAILED\n");
-		phy_write_mmd(phydev, MMD1F, 0x0576, 0x0000);
-	}
-	return -EINVAL;
-	
-}
-
-static int DP83TG720_chip_init(struct phy_device *phydev)
-{
-	struct DP83TG720_private *DP83TG720 = phydev->priv;
-	int ret;
-
-	ret = DP83TG720_reset(phydev, true);
-	if (ret)
-		return ret;
-	
-	phydev->autoneg = AUTONEG_DISABLE;
-    	phydev->speed = SPEED_1000;
-	phydev->duplex = DUPLEX_FULL;
-    	linkmode_set_bit(ETHTOOL_LINK_MODE_1000baseT_Full_BIT,
-                              phydev->supported);
-
-	if (DP83TG720->is_master)
-	        ret = phy_write_mmd(phydev, MMD1, 0x0834,
-				0xc001);
-	else
-	        ret = phy_write_mmd(phydev, MMD1, 0x0834,
-				0x8001);
-	if (ret)
-		return ret;
-
-	switch (DP83TG720->chip) {
-	case DP83TG720_CS1_1:
-		ret = phy_write_mmd(phydev, MMD1F, 0x573, 0x101);
-		if (ret)
-			return ret;
-
-		if (DP83TG720->is_master)
-			ret = DP83TG720_write_seq(phydev, DP83TG720_cs1_1_master_init,
-						ARRAY_SIZE(DP83TG720_cs1_1_master_init));
-		else
-			ret = DP83TG720_write_seq(phydev, DP83TG720_cs1_1_slave_init,
-						ARRAY_SIZE(DP83TG720_cs1_1_slave_init));
-
-		ret = DP83TG720_reset(phydev, false);
-
-		ret = phy_write_mmd(phydev, MMD1F, 0x573, 0x001);
-	        if (ret)
-	                return ret;
-
-		return phy_write_mmd(phydev, MMD1F, 0x56a, 0x5f41);
-	case DP83TG721_CS1:
-		ret = phy_write_mmd(phydev, MMD1F, 0x573, 0x101);
-		if (ret)
-			return ret;
-
-		if (DP83TG720->is_master)
-			ret = DP83TG720_write_seq(phydev, DP83TG721_cs1_master_init,
-						ARRAY_SIZE(DP83TG721_cs1_master_init));
-		else
-			ret = DP83TG720_write_seq(phydev, DP83TG721_cs1_slave_init,
-						ARRAY_SIZE(DP83TG721_cs1_slave_init));
-
-		ret = DP83TG720_reset(phydev, false);
-
-		ret = phy_write_mmd(phydev, MMD1F, 0x573, 0x001);
-	        if (ret)
-	                return ret;
-
-		return phy_write_mmd(phydev, MMD1F, 0x56a, 0x5f41);
-	default:
-		return -EINVAL;
-	};
-
-	if (ret)
-		return ret;
-
-	/* Enable the PHY */
-	ret = phy_write_mmd(phydev, MMD1F, 0x18c, 0x1);
-	if (ret)
-		return ret;
-
-	mdelay(10);
-
-	/* Do a software reset to restart the PHY with the updated values */
-	return DP83TG720_reset(phydev, false);
-}
-
-static int DP83TG720_config_init(struct phy_device *phydev)
-{
-	struct device *dev = &phydev->mdio.dev;
-	s32 rx_int_delay;
-	s32 tx_int_delay;
-	int rgmii_delay;
-	int value, ret;
-
-	ret = DP83TG720_chip_init(phydev);
-	if (ret)
-		return ret;
-
-	if (phy_interface_is_rgmii(phydev)) {
-		rx_int_delay = phy_get_internal_delay(phydev, dev, NULL, 0, true);
-		if (rx_int_delay <= 0)
-			rgmii_delay = 0;
-		else
-			rgmii_delay = DP83TG720_RX_CLK_SHIFT;
-
-		tx_int_delay = phy_get_internal_delay(phydev, dev, NULL, 0, false);
-		if (tx_int_delay <= 0)
-			rgmii_delay &= ~DP83TG720_TX_CLK_SHIFT;
-		else
-			rgmii_delay |= DP83TG720_TX_CLK_SHIFT;
-
-		if (rgmii_delay) {
-			ret = phy_set_bits_mmd(phydev, MMD1, DP83TG720_RGMII_ID_CTRL, rgmii_delay);
-			if (ret)
-				return ret;
-		}
-	}
-
-	value = phy_read_mmd(phydev, MMD1F, DP83TG720_SGMII_CTRL);
-	if (value < 0)
-		return value;
-
-	if (phydev->interface == PHY_INTERFACE_MODE_SGMII)
-		value |= DP83TG720_SGMII_EN;
-	else
-		value &= ~DP83TG720_SGMII_EN;
-
-	ret = phy_write_mmd(phydev, MMD1F, DP83TG720_SGMII_CTRL, value);
+	/* The DP83TG720S_PKT_STAT registers are divided into two groups:
+	 * - Group 1 (TX stats): DP83TG720S_PKT_STAT_1 to DP83TG720S_PKT_STAT_3
+	 * - Group 2 (RX stats): DP83TG720S_PKT_STAT_4 to DP83TG720S_PKT_STAT_6
+	 *
+	 * Registers in each group are cleared only after reading them in a
+	 * plain sequence (e.g., 1, 2, 3 for Group 1 or 4, 5, 6 for Group 2).
+	 * Any deviation from the sequence, such as reading 1, 2, 1, 2, 3, will
+	 * prevent the group from being cleared. Additionally, the counters
+	 * for a group are frozen as soon as the first register in that group
+	 * is accessed.
+	 */
+	ret = phy_read_mmd(phydev, MDIO_MMD_VEND2, DP83TG720S_PKT_STAT_1);
 	if (ret < 0)
 		return ret;
+	/* tx_pkt_cnt_15_0 */
+	count = ret;
+
+	ret = phy_read_mmd(phydev, MDIO_MMD_VEND2, DP83TG720S_PKT_STAT_2);
+	if (ret < 0)
+		return ret;
+	/* tx_pkt_cnt_31_16 */
+	count |= ret << 16;
+	priv->stats.tx_pkt_cnt += count;
+
+	ret = phy_read_mmd(phydev, MDIO_MMD_VEND2, DP83TG720S_PKT_STAT_3);
+	if (ret < 0)
+		return ret;
+	/* tx_err_pkt_cnt */
+	priv->stats.tx_err_pkt_cnt += ret;
+
+	ret = phy_read_mmd(phydev, MDIO_MMD_VEND2, DP83TG720S_PKT_STAT_4);
+	if (ret < 0)
+		return ret;
+	/* rx_pkt_cnt_15_0 */
+	count = ret;
+
+	ret = phy_read_mmd(phydev, MDIO_MMD_VEND2, DP83TG720S_PKT_STAT_5);
+	if (ret < 0)
+		return ret;
+	/* rx_pkt_cnt_31_16 */
+	count |= ret << 16;
+	priv->stats.rx_pkt_cnt += count;
+
+	ret = phy_read_mmd(phydev, MDIO_MMD_VEND2, DP83TG720S_PKT_STAT_6);
+	if (ret < 0)
+		return ret;
+	/* rx_err_pkt_cnt */
+	priv->stats.rx_err_pkt_cnt += ret;
 
 	return 0;
 }
 
-static int DP83TG720_config_intr(struct phy_device *phydev)
+static int dp83tg720_soft_reset(struct phy_device *phydev)
 {
-	int misr_status, ret;
+	int ret;
 
-	if (phydev->interrupts == PHY_INTERRUPT_ENABLED) {
-		misr_status = phy_read(phydev, MII_DP83TG720_INT_STAT1);
-		if (misr_status < 0)
-			return misr_status;
+	ret = phy_write(phydev, DP83TG720S_PHY_RESET, DP83TG720S_HW_RESET);
+	if (ret)
+		return ret;
 
-		misr_status |= (DP83TG720_ANEG_COMPLETE_INT_EN |
-				DP83TG720_ESD_EVENT_INT_EN |
-				DP83TG720_LINK_STAT_INT_EN |
-				DP83TG720_ENERGY_DET_INT_EN |
-				DP83TG720_LINK_QUAL_INT_EN);
-
-		ret = phy_write(phydev, MII_DP83TG720_INT_STAT1, misr_status);
-		if (ret < 0)
-			return ret;
-
-		misr_status = phy_read(phydev, MII_DP83TG720_INT_STAT2);
-		if (misr_status < 0)
-			return misr_status;
-
-		misr_status |= (DP83TG720_SLEEP_MODE_INT_EN |
-				DP83TG720_OVERTEMP_INT_EN |
-				DP83TG720_OVERVOLTAGE_INT_EN |
-				DP83TG720_UNDERVOLTAGE_INT_EN);
-
-		ret = phy_write(phydev, MII_DP83TG720_INT_STAT2, misr_status);
-		if (ret < 0)
-			return ret;
-
-		misr_status = phy_read(phydev, MII_DP83TG720_INT_STAT3);
-		if (misr_status < 0)
-			return misr_status;
-
-		misr_status |= (DP83TG720_LPS_INT_EN |
-				DP83TG720_WAKE_REQ_EN |
-				DP83TG720_NO_FRAME_INT_EN |
-				DP83TG720_POR_DONE_INT_EN);
-
-		ret = phy_write(phydev, MII_DP83TG720_INT_STAT3, misr_status);
-
-	} else {
-		ret = phy_write(phydev, MII_DP83TG720_INT_STAT1, 0);
-		if (ret < 0)
-			return ret;
-
-		ret = phy_write(phydev, MII_DP83TG720_INT_STAT2, 0);
-		if (ret < 0)
-			return ret;
-
-		ret = phy_write(phydev, MII_DP83TG720_INT_STAT3, 0);
-		if (ret < 0)
-			return ret;
-
-		ret = phy_read(phydev, MII_DP83TG720_INT_STAT1);
-		if (ret < 0)
-			return ret;
-
-		ret = phy_read(phydev, MII_DP83TG720_INT_STAT2);
-		if (ret < 0)
-			return ret;
-
-		ret = phy_read(phydev, MII_DP83TG720_INT_STAT3);
-		if (ret < 0)
-			return ret;
-
-		ret = 0;
-
-	}
+	/* Include mandatory MDC-access delay (1ms) + extra asymmetric delay to
+	 * avoid synchronized reset deadlock. See section 1 in the top-of-file
+	 * comment block.
+	 */
+	if (phydev->master_slave_state == MASTER_SLAVE_STATE_SLAVE)
+		msleep(DP83TG720S_RESET_DELAY_MS_SLAVE);
+	else
+		msleep(DP83TG720S_RESET_DELAY_MS_MASTER);
 
 	return ret;
 }
 
-static int DP83TG720_config_aneg(struct phy_device *phydev)
+static void dp83tg720_get_link_stats(struct phy_device *phydev,
+				     struct ethtool_link_ext_stats *link_stats)
 {
-	bool changed = false;
-	int err, value, ret;
+	struct dp83tg720_priv *priv = phydev->priv;
 
-	if (phydev->interface == PHY_INTERFACE_MODE_SGMII) {
-		value = phy_read(phydev, DP83TG720_SGMII_CTRL);
-		ret = phy_write_mmd(phydev, MMD1F, DP83TG720_SGMII_CTRL,
-				SGMII_CONFIG_VAL);
-		if (ret < 0)
-			return ret;
-	}
-
-	err = DP83TG720_setup_master_slave(phydev);
-	if (err < 0)
-		return err;
-	else if (err)
-		changed = true;
-	
-	if (AUTONEG_ENABLE != phydev->autoneg)
-		return genphy_setup_forced(phydev);
-
-	return genphy_config_aneg(phydev);
+	link_stats->link_down_events = priv->stats.link_loss_cnt;
 }
 
-static int DP83TG720_probe(struct phy_device *phydev)
+static void dp83tg720_get_phy_stats(struct phy_device *phydev,
+				    struct ethtool_eth_phy_stats *eth_stats,
+				    struct ethtool_phy_stats *stats)
 {
-	struct DP83TG720_private *DP83TG720;
+	struct dp83tg720_priv *priv = phydev->priv;
+
+	stats->tx_packets = priv->stats.tx_pkt_cnt;
+	stats->tx_errors = priv->stats.tx_err_pkt_cnt;
+	stats->rx_packets = priv->stats.rx_pkt_cnt;
+	stats->rx_errors = priv->stats.rx_err_pkt_cnt;
+}
+
+/**
+ * dp83tg720_cable_test_start - Start the cable test for the DP83TG720 PHY.
+ * @phydev: Pointer to the phy_device structure.
+ *
+ * This sequence is based on the documented procedure for the DP83TG720 PHY.
+ *
+ * Returns: 0 on success, a negative error code on failure.
+ */
+static int dp83tg720_cable_test_start(struct phy_device *phydev)
+{
 	int ret;
 
-	DP83TG720 = devm_kzalloc(&phydev->mdio.dev, sizeof(*DP83TG720),
-			       GFP_KERNEL);
-	if (!DP83TG720)
-		return -ENOMEM;
+	/* Initialize the PHY to run the TDR test as described in the
+	 * "DP83TG720S-Q1: Configuring for Open Alliance Specification
+	 * Compliance (Rev. B)" application note.
+	 * Most of the registers are not documented. Some of register names
+	 * are guessed by comparing the register offsets with the DP83TD510E.
+	 */
 
-	phydev->priv = DP83TG720;
-
-	ret = DP83TG720_read_straps(phydev);
+	/* Force master link down */
+	ret = phy_set_bits_mmd(phydev, MDIO_MMD_VEND2,
+			       DP83TG720S_TDR_MASTER_LINK_DOWN, 0x0400);
 	if (ret)
 		return ret;
 
-	switch (phydev->phy_id) {
-	case DP83TG720_CS_1_1_PHY_ID:
-		DP83TG720->chip = DP83TG720_CS1_1;
+	ret = phy_write_mmd(phydev, MDIO_MMD_VEND2, DP83TG720S_TDR_CFG2,
+			    0xa008);
+	if (ret)
+		return ret;
+
+	ret = phy_write_mmd(phydev, MDIO_MMD_VEND2, DP83TG720S_TDR_CFG3,
+			    0x0928);
+	if (ret)
+		return ret;
+
+	ret = phy_write_mmd(phydev, MDIO_MMD_VEND2, DP83TG720S_TDR_CFG4,
+			    0x0004);
+	if (ret)
+		return ret;
+
+	ret = phy_write_mmd(phydev, MDIO_MMD_VEND2, DP83TG720S_UNKNOWN_0405,
+			    0x6400);
+	if (ret)
+		return ret;
+
+	ret = phy_write_mmd(phydev, MDIO_MMD_VEND2, DP83TG720S_UNKNOWN_083F,
+			    0x3003);
+	if (ret)
+		return ret;
+
+	/* Start the TDR */
+	ret = phy_set_bits_mmd(phydev, MDIO_MMD_VEND2, DP83TG720S_TDR_CFG,
+			       DP83TG720S_TDR_START);
+	if (ret)
+		return ret;
+
+	return 0;
+}
+
+/**
+ * dp83tg720_cable_test_get_status - Get the status of the cable test for the
+ *                                   DP83TG720 PHY.
+ * @phydev: Pointer to the phy_device structure.
+ * @finished: Pointer to a boolean that indicates whether the test is finished.
+ *
+ * The function sets the @finished flag to true if the test is complete.
+ *
+ * Returns: 0 on success or a negative error code on failure.
+ */
+static int dp83tg720_cable_test_get_status(struct phy_device *phydev,
+					   bool *finished)
+{
+	int ret, stat;
+
+	*finished = false;
+
+	/* Read the TDR status */
+	ret = phy_read_mmd(phydev, MDIO_MMD_VEND2, DP83TG720S_TDR_CFG);
+	if (ret < 0)
+		return ret;
+
+	/* Check if the TDR test is done */
+	if (!(ret & DP83TG720S_TDR_DONE))
+		return 0;
+
+	/* Check for TDR test failure */
+	if (!(ret & DP83TG720S_TDR_FAIL)) {
+		int location;
+
+		/* Read fault status */
+		ret = phy_read_mmd(phydev, MDIO_MMD_VEND2,
+				   DP83TG720S_TDR_FAULT_STATUS);
+		if (ret < 0)
+			return ret;
+
+		/* Get fault type */
+		stat = oa_1000bt1_get_ethtool_cable_result_code(ret);
+
+		/* Determine fault location */
+		location = oa_1000bt1_get_tdr_distance(ret);
+		if (location > 0)
+			ethnl_cable_test_fault_length(phydev,
+						      ETHTOOL_A_CABLE_PAIR_A,
+						      location);
+	} else {
+		/* Active link partner or other issues */
+		stat = ETHTOOL_A_CABLE_RESULT_CODE_UNSPEC;
+	}
+
+	*finished = true;
+
+	ethnl_cable_test_result(phydev, ETHTOOL_A_CABLE_PAIR_A, stat);
+
+	/* save the current stats before resetting the PHY */
+	ret = dp83tg720_update_stats(phydev);
+	if (ret)
+		return ret;
+
+	return phy_init_hw(phydev);
+}
+
+static int dp83tg720_config_aneg(struct phy_device *phydev)
+{
+	int ret;
+
+	/* Autoneg is not supported and this PHY supports only one speed.
+	 * We need to care only about master/slave configuration if it was
+	 * changed by user.
+	 */
+	ret = genphy_c45_pma_baset1_setup_master_slave(phydev);
+	if (ret)
+		return ret;
+
+	/* Re-read role configuration to make changes visible even if
+	 * the link is in administrative down state.
+	 */
+	return genphy_c45_pma_baset1_read_master_slave(phydev);
+}
+
+static int dp83tg720_read_status(struct phy_device *phydev)
+{
+	u16 phy_sts;
+	int ret;
+
+	phydev->pause = 0;
+	phydev->asym_pause = 0;
+
+	/* Most of Clause 45 registers are not present, so we can't use
+	 * genphy_c45_read_status() here.
+	 */
+	phy_sts = phy_read(phydev, DP83TG720S_MII_REG_10);
+	phydev->link = !!(phy_sts & DP83TG720S_LINK_STATUS);
+	if (!phydev->link) {
+		/* save the current stats before resetting the PHY */
+		ret = dp83tg720_update_stats(phydev);
+		if (ret)
+			return ret;
+
+		/* According to the "DP83TC81x, DP83TG72x Software
+		 * Implementation Guide", the PHY needs to be reset after a
+		 * link loss or if no link is created after at least 100ms.
+		 */
+		ret = phy_init_hw(phydev);
+		if (ret)
+			return ret;
+
+		/* After HW reset we need to restore master/slave configuration.
+		 * genphy_c45_pma_baset1_read_master_slave() call will be done
+		 * by the dp83tg720_config_aneg() function.
+		 */
+		ret = dp83tg720_config_aneg(phydev);
+		if (ret)
+			return ret;
+
+		phydev->speed = SPEED_UNKNOWN;
+		phydev->duplex = DUPLEX_UNKNOWN;
+	} else {
+		/* PMA/PMD control 1 register (Register 1.0) is present, but it
+		 * doesn't contain the link speed information.
+		 * So genphy_c45_read_pma() can't be used here.
+		 */
+		ret = genphy_c45_pma_baset1_read_master_slave(phydev);
+		if (ret)
+			return ret;
+
+		phydev->duplex = DUPLEX_FULL;
+		phydev->speed = SPEED_1000;
+	}
+
+	return 0;
+}
+
+static int dp83tg720_get_sqi(struct phy_device *phydev)
+{
+	int ret;
+
+	if (!phydev->link)
+		return 0;
+
+	ret = phy_read_mmd(phydev, MDIO_MMD_VEND2, DP83TG720S_SQI_REG_1);
+	if (ret < 0)
+		return ret;
+
+	return FIELD_GET(DP83TG720S_SQI_OUT, ret);
+}
+
+static int dp83tg720_get_sqi_max(struct phy_device *phydev)
+{
+	return DP83TG720_SQI_MAX;
+}
+
+static int dp83tg720_config_rgmii_delay(struct phy_device *phydev)
+{
+	u16 rgmii_delay_mask;
+	u16 rgmii_delay = 0;
+
+	switch (phydev->interface) {
+	case PHY_INTERFACE_MODE_RGMII:
+		rgmii_delay = 0;
 		break;
-	case DP83TG721_CS_1_0_PHY_ID:
-		DP83TG720->chip = DP83TG721_CS1;
+	case PHY_INTERFACE_MODE_RGMII_ID:
+		rgmii_delay = DP83TG720S_RGMII_RX_CLK_SEL |
+				DP83TG720S_RGMII_TX_CLK_SEL;
+		break;
+	case PHY_INTERFACE_MODE_RGMII_RXID:
+		rgmii_delay = DP83TG720S_RGMII_RX_CLK_SEL;
+		break;
+	case PHY_INTERFACE_MODE_RGMII_TXID:
+		rgmii_delay = DP83TG720S_RGMII_TX_CLK_SEL;
 		break;
 	default:
-		return -EINVAL;
-	};
+		return 0;
+	}
 
-	return DP83TG720_config_init(phydev);
+	rgmii_delay_mask = DP83TG720S_RGMII_RX_CLK_SEL |
+		DP83TG720S_RGMII_TX_CLK_SEL;
+
+	return phy_modify_mmd(phydev, MDIO_MMD_VEND2,
+			      DP83TG720S_RGMII_DELAY_CTRL, rgmii_delay_mask,
+			      rgmii_delay);
 }
 
-#if 0
-static irqreturn_t DP83TG720_handle_interrupt(struct phy_device *phydev)
+static int dp83tg720_config_init(struct phy_device *phydev)
 {
-	int irq_status;
+	int ret;
 
-	irq_status = phy_read(phydev, MII_DP83TG720_INT_STAT1);
-	if (irq_status < 0) {
-		phy_error(phydev);
-		return IRQ_NONE;
+	/* Reset the PHY to recover from a link failure */
+	ret = dp83tg720_soft_reset(phydev);
+	if (ret)
+		return ret;
+
+	if (phy_interface_is_rgmii(phydev)) {
+		ret = dp83tg720_config_rgmii_delay(phydev);
+		if (ret)
+			return ret;
 	}
-	if (irq_status & ((irq_status & GENMASK(7, 0)) << 8))
-		goto trigger_machine;
 
-	irq_status = phy_read(phydev, MII_DP83TG720_INT_STAT2);
-	if (irq_status < 0) {
-		phy_error(phydev);
-		return IRQ_NONE;
-	}
-	if (irq_status & ((irq_status & GENMASK(7, 0)) << 8))
-		goto trigger_machine;
+	/* In case the PHY is bootstrapped in managed mode, we need to
+	 * wake it.
+	 */
+	ret = phy_write_mmd(phydev, MDIO_MMD_VEND2, DP83TG720S_LPS_CFG3,
+			    DP83TG720S_LPS_CFG3_PWR_MODE_0);
+	if (ret)
+		return ret;
 
-	irq_status = phy_read(phydev, MII_DP83TG720_INT_STAT3);
-	if (irq_status < 0) {
-		phy_error(phydev);
-		return IRQ_NONE;
-	}
-	if (irq_status & ((irq_status & GENMASK(7, 0)) << 8))
-		goto trigger_machine;
-
-	return IRQ_NONE;
-
-trigger_machine:
-	phy_trigger_machine(phydev);
-
-	return IRQ_HANDLED;
+	/* Make role configuration visible for ethtool on init and after
+	 * rest.
+	 */
+	return genphy_c45_pma_baset1_read_master_slave(phydev);
 }
-#endif
 
-#define DP83TG720_PHY_DRIVER(_id, _name)				\
-	{							\
-		PHY_ID_MATCH_EXACT(_id),			\
-		.name		= (_name),			\
-		.probe          = DP83TG720_probe,		\
-		/* PHY_GBIT_FEATURES */				\
-		.soft_reset	= DP83TG720_phy_reset,		\
-		.config_init	= DP83TG720_config_init,		\
-		.config_aneg = DP83TG720_config_aneg,		\
-		.get_sqi = DP83TG720_sqi,		\
-		.get_sqi_max = DP83TG720_sqi_max,		\
-		.cable_test_start = DP83TG720_cable_test_start,		\
-		.cable_test_get_status = DP83TG720_cable_test_get_status,	\
-		.read_status = DP83TG720_read_status,	\
-/*if 0								\
-		.handle_interrupt = DP83TG720_handle_interrupt,	\
-#endif	*/							\
-		.config_intr = DP83TG720_config_intr,		\
-		.suspend = genphy_suspend,			\
-		.resume = genphy_resume,			\
+static int dp83tg720_probe(struct phy_device *phydev)
+{
+	struct device *dev = &phydev->mdio.dev;
+	struct dp83tg720_priv *priv;
+
+	priv = devm_kzalloc(dev, sizeof(*priv), GFP_KERNEL);
+	if (!priv)
+		return -ENOMEM;
+
+	phydev->priv = priv;
+
+	return 0;
+}
+
+/**
+ * dp83tg720_get_next_update_time - Return next polling interval for PHY state
+ * @phydev: Pointer to the phy_device structure
+ *
+ * Implements adaptive polling interval logic depending on link state and
+ * downtime duration. See the "2. Polling-Based Link Detection and IRQ Support"
+ * section at the top of this file for details.
+ *
+ * Return: Time (in jiffies) until the next poll
+ */
+static unsigned int dp83tg720_get_next_update_time(struct phy_device *phydev)
+{
+	struct dp83tg720_priv *priv = phydev->priv;
+	unsigned int next_time_jiffies;
+
+	if (phydev->link) {
+		priv->last_link_down_jiffies = 0;
+
+		/* When the link is up, use a slower interval (in jiffies) */
+		next_time_jiffies =
+			msecs_to_jiffies(DP83TG720S_POLL_ACTIVE_LINK);
+	} else {
+		unsigned long now = jiffies;
+
+		if (!priv->last_link_down_jiffies)
+			priv->last_link_down_jiffies = now;
+
+		if (time_before(now, priv->last_link_down_jiffies +
+			  msecs_to_jiffies(DP83TG720S_FAST_POLL_DURATION_MS))) {
+			/* Link recently went down: fast polling */
+			next_time_jiffies =
+				msecs_to_jiffies(DP83TG720S_POLL_NO_LINK);
+		} else {
+			/* Link has been down for a while: slow polling */
+			next_time_jiffies =
+				msecs_to_jiffies(DP83TG720S_POLL_SLOW);
+		}
 	}
 
-static struct phy_driver DP83TG720_driver[] = {
-	DP83TG720_PHY_DRIVER(DP83TG720_CS_1_1_PHY_ID, "TI DP83TG720CS1.1"),
-	DP83TG720_PHY_DRIVER(DP83TG721_CS_1_0_PHY_ID, "TI DP83TG721CS1.0"),
-};
-module_phy_driver(DP83TG720_driver);
+	/* Ensure the polling time is at least one jiffy */
+	return max(next_time_jiffies, 1U);
+}
 
-static struct mdio_device_id __maybe_unused DP83TG720_tbl[] = {
-	{ PHY_ID_MATCH_EXACT(DP83TG720_CS_1_1_PHY_ID) },
-	{ PHY_ID_MATCH_EXACT(DP83TG721_CS_1_0_PHY_ID) },
-	{ },
-};
-MODULE_DEVICE_TABLE(mdio, DP83TG720_tbl);
+static struct phy_driver dp83tg720_driver[] = {
+{
+	PHY_ID_MATCH_MODEL(DP83TG720S_PHY_ID),
+	.name		= "TI DP83TG720S",
 
-MODULE_DESCRIPTION("Texas Instruments DP83TG720 PHY driver");
-MODULE_AUTHOR("Dan Murphy <dmurphy@ti.com");
+	.flags          = PHY_POLL_CABLE_TEST,
+	.probe		= dp83tg720_probe,
+	.soft_reset	= dp83tg720_soft_reset,
+	.config_aneg	= dp83tg720_config_aneg,
+	.read_status	= dp83tg720_read_status,
+	.get_features	= genphy_c45_pma_read_ext_abilities,
+	.config_init	= dp83tg720_config_init,
+	.get_sqi	= dp83tg720_get_sqi,
+	.get_sqi_max	= dp83tg720_get_sqi_max,
+	.cable_test_start = dp83tg720_cable_test_start,
+	.cable_test_get_status = dp83tg720_cable_test_get_status,
+	.get_link_stats	= dp83tg720_get_link_stats,
+	.get_phy_stats	= dp83tg720_get_phy_stats,
+	.update_stats	= dp83tg720_update_stats,
+	.get_next_update_time = dp83tg720_get_next_update_time,
+
+	.suspend	= genphy_suspend,
+	.resume		= genphy_resume,
+} };
+module_phy_driver(dp83tg720_driver);
+
+static const struct mdio_device_id __maybe_unused dp83tg720_tbl[] = {
+	{ PHY_ID_MATCH_MODEL(DP83TG720S_PHY_ID) },
+	{ }
+};
+MODULE_DEVICE_TABLE(mdio, dp83tg720_tbl);
+
+MODULE_DESCRIPTION("Texas Instruments DP83TG720S PHY driver");
+MODULE_AUTHOR("Oleksij Rempel <kernel@pengutronix.de>");
 MODULE_LICENSE("GPL");
