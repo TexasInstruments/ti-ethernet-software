@@ -47,6 +47,7 @@
 #define DP83869_RGMIICTL	0x0032
 #define DP83869_STRAP_STS1	0x006e
 #define DP83869_RGMIIDCTL	0x0086
+#define DP83869_ANA_PLL_PROG_PI	0x00c6
 #define DP83869_RXFCFG		0x0134
 #define DP83869_RXFPMD1		0x0136
 #define DP83869_RXFPMD2		0x0137
@@ -836,6 +837,10 @@ static int dp83869_config_init(struct phy_device *phydev)
 
 	/* Clock output selection if muxing property is set */
 	if (dp83869->clk_output_sel != DP83869_CLK_O_SEL_REF_CLK)
+	        ret = phy_write_mmd(phydev, DP83869_DEVADDR, DP83869_ANA_PLL_PROG_PI, 0x10);
+		if (ret)
+			return ret;
+
 		ret = phy_modify_mmd(phydev,
 				     DP83869_DEVADDR, DP83869_IO_MUX_CFG,
 				     DP83869_IO_MUX_CFG_CLK_O_SEL_MASK,
