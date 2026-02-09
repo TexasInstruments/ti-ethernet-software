@@ -47,7 +47,6 @@
 #define DP83869_RGMIICTL	0x0032
 #define DP83869_STRAP_STS1	0x006e
 #define DP83869_RGMIIDCTL	0x0086
-#define DP83869_ANA_PLL_PROG_PI	0x00c6
 #define DP83869_RXFCFG		0x0134
 #define DP83869_RXFPMD1		0x0136
 #define DP83869_RXFPMD2		0x0137
@@ -58,6 +57,7 @@
 #define DP83869_IO_MUX_CFG	0x0170
 #define DP83869_OP_MODE		0x01df
 #define DP83869_FX_CTRL		0x0c00
+#define DP83869_ANA_PLL_PROG_PI	0x00c6
 
 #define DP83869_SW_RESET	BIT(15)
 #define DP83869_SW_RESTART	BIT(14)
@@ -120,7 +120,6 @@
 #define DP83869_IO_MUX_CFG_IO_IMPEDANCE_MAX	0x0
 #define DP83869_IO_MUX_CFG_IO_IMPEDANCE_MIN	0x1f
 #define DP83869_IO_MUX_CFG_CLK_O_SEL_MASK	(0x1f << 8)
-#define DP83869_IO_MUX_CFG_CLK_O_SEL_SHIFT	8
 #define DP83869_LED1_MUX_RXER				0xE
 
 /* CFG3 bits */
@@ -836,16 +835,18 @@ static int dp83869_config_init(struct phy_device *phydev)
 		dp83869_config_port_mirroring(phydev);
 
 	/* Clock output selection if muxing property is set */
-	if (dp83869->clk_output_sel != DP83869_CLK_O_SEL_REF_CLK)
-	        ret = phy_write_mmd(phydev, DP83869_DEVADDR, DP83869_ANA_PLL_PROG_PI, 0x10);
+	if (dp83869->clk_output_sel != DP83869_CLK_O_SEL_REF_CLK) {
+		ret = phy_write_mmd(phydev, DP83869_DEVADDR, DP83869_ANA_PLL_PROG_PI, 0x10);
 		if (ret)
 			return ret;
 
 		ret = phy_modify_mmd(phydev,
 				     DP83869_DEVADDR, DP83869_IO_MUX_CFG,
 				     DP83869_IO_MUX_CFG_CLK_O_SEL_MASK,
-				     dp83869->clk_output_sel <<
-				     DP83869_IO_MUX_CFG_CLK_O_SEL_SHIFT);
+				     dp83869->clk_output_sel & DP83869_IO_MUX_CFG_CLK_O_SEL_MASK); 
+		if (ret)
+			return ret;
+    }
 
 	if (phy_interface_is_rgmii(phydev)) {
 		ret = phy_write_mmd(phydev, DP83869_DEVADDR, DP83869_RGMIIDCTL,
