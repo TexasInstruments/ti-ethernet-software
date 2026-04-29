@@ -1,0 +1,26 @@
+/*
+ * Generic DTS Host Board Configuration
+ * Limited MAC, PHY, MDIO entries
+ */
+
+&gmac {
+	status = "okay";
+	pinctrl-0 = <&gmac_rmii>;
+	pinctrl-names = "default";
+	phy-handle = <&phy>;
+        local-mac-address = [04 05 06 01 02 03];
+};
+
+&mdio {
+
+	status = "okay";
+	pinctrl-0 = <&mdio_default>;
+	pinctrl-names = "default";
+
+	phy: ethernet-phy@0 {
+		compatible = "ti,dp83td510";
+		ti,interface-type = "rmii-25MHz";
+		status = "okay";
+		reg = <0>;
+	};
+};

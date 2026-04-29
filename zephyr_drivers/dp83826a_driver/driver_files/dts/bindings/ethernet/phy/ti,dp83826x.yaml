@@ -1,0 +1,93 @@
+# Copyright 2023-2024 NXP
+# Copyright 2026 Texas Instruments
+# SPDX-License-Identifier: Apache-2.0
+#
+#
+# Example DTS:
+# 
+# phy: ethernet-phy@0 {
+# 	compatible = "ti,dp83826x";
+# 	status = "okay";
+# 	reg = <0>;
+# 	ti,interface-type = "rmii-follower";
+# };
+#
+#
+# 
+#
+
+description: TI DP83826X Ethernet PHY device
+
+compatible: "ti,dp83826x"
+
+include: ethernet-phy-common.yaml
+
+properties:
+  reset-gpios:
+    type: phandle-array
+    description: GPIO connected to PHY reset signal pin. Reset is active low.
+  int-gpios:
+    type: phandle-array
+    description: GPIO for interrupt signal indicating PHY state change.
+  ti,interface-type:
+    type: string
+    required: true
+    description: Which type of phy connection the phy is set up for
+    enum:
+      - "mii"
+      - "rmii-leader"
+      - "rmii-follower"
+
+  ti,cfg-dac-minus-one-bp:
+    description: |
+       Sets the voltage ratio (with respect to the nominal value)
+       of the logical level -1 for the MLT-3 encoded TX data.
+    type: int
+    enum:
+      - 5000
+      - 5625
+      - 6250
+      - 6875
+      - 7500
+      - 8125
+      - 8750
+      - 9375
+      - 10000
+      - 10625
+      - 11250
+      - 11875
+      - 12500
+      - 13125
+      - 13750
+      - 14375
+      - 15000
+    default: 10000
+
+  ti,cfg-dac-plus-one-bp:
+    description: |
+       Sets the voltage ratio (with respect to the nominal value)
+       of the logical level +1 for the MLT-3 encoded TX data.
+    type: int
+    enum:
+      - 5000
+      - 5625
+      - 6250
+      - 6875
+      - 7500
+      - 8125
+      - 8750
+      - 9375
+      - 10000
+      - 10625
+      - 11250
+      - 11875
+      - 12500
+      - 13125
+      - 13750
+      - 14375
+      - 15000
+    default: 10000
+
+  default-speeds:
+    default: ["10BASE Half-Duplex", "10BASE Full-Duplex", "100BASE Half-Duplex",
+              "100BASE Full-Duplex"]
